@@ -77,91 +77,55 @@ void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<
 {
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
 
-    //TODO: SKIP 0th because we're multiplying by 0. cos(0) = 1, sin(0) = 0
-
     // ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
     // streamHw.resetStreamHw();
 
-    // only calculate half of i/WINDOW_SIZE elements because it inverts and repeats after that
-
-    // return;
-
-    // for (size_t i = 0; i < WINDOW_SIZE; ++i)
-    // {
-    //     if (i == 0)
-    //     {
-    //         for (size_t j = 0; j < WINDOW_SIZE; ++j)
-    //         {
-    //             cosInput[i][j] = 1;
-    //         }
-
-    //         continue;
-    //     }
-
-    //     size_t calc_win = WINDOW_SIZE / (1 * i);
-
-    //     if (WINDOW_SIZE % i == 0)
-    //     {
-    //         for (size_t j = 0; j < calc_win + 1; ++j)
-    //         {
-    //             cosInput[i][j] = ec_cos(angleConst * i * j);
-    //         }
-
-    //         for (size_t j = 1; j < i; j++)
-    //         {
-    //             // QUARTER WAVE FLIP IMPLEMENATION. DOES NOT WORK DUE TO FLOAT PRECISION
-    //             // for (size_t k = 1; k < calc_win; k++)
-    //             // {
-    //             //     cosInput[i][k + calc_win] = ec::Float(-1.0f) * cosInput[i][calc_win - k];
-    //             //     cosInput[i][k + 3 * calc_win] = cosInput[i][calc_win - k];
-    //             // }
-
-    //             // for (size_t k = 0; k < calc_win; k++)
-    //             // {
-    //             //     cosInput[i][k + 2 * calc_win] = cosInput[i][2 * calc_win - k];
-    //             // }
-
-    //             for (size_t k = 0; k < calc_win; k++)
-    //             {
-    //                 cosInput[i][j * calc_win + k] = cosInput[i][j * calc_win - k];
-    //             }
-    //         }
-    //     }
-    //     else
-    //     {
-    //         for (size_t j = 0; j < WINDOW_SIZE; ++j)
-    //         {
-    //             cosInput[i][j] = ec_cos(angleConst * i * j);
-    //         }
-    //     }
-    // }
-
-    std::vector<std::vector<ec::Float>> cosAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE + 512));
-    std::vector<std::vector<ec::Float>> sinAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
 
     for (size_t i = 0; i < WINDOW_SIZE; ++i)
     {
-        for (size_t j = 0; j < WINDOW_SIZE + WINDOW_SIZE / (4*i); ++j)
+        if (i == 0)
         {
-            cosAngleTerms[i][j] = ec_cos(angleConst * i * j);
+            for (size_t j = 0; j < WINDOW_SIZE; ++j)
+            {
+                cosInput[i][j] = 1.0f;
+            }
+
+            continue;
         }
 
-        for (size_t j = 0; j < WINDOW_SIZE; j++)
+        // i != 0 from now on
+        for (size_t j = 0; j < WINDOW_SIZE; ++j)
         {
-            if (WINDOW_SIZE % i == 0)
+            if (j == 0)
             {
-                
+                cosInput[i][j] = 1.0f;
             }
             else
             {
-                sinInput[i][j] = ec_sin(angleConst * i * j);
+                cosInput[i][j] = ec_cos(angleConst * i * j);
+            }
+        }
+
+        // sin is just an offset of cos. let's take advantage of that
+        if (WINDOW_SIZE % (4 * i) == 0)
+        {
+            size_t offset = WINDOW_SIZE / (4 * i);
+
+            for (size_t j = 0; j < WINDOW_SIZE - offset; j++)
+            {
+                sinInput[i][j] = cosInput[i][j + offset];
             }
 
-            if (sinAngleTerms[i][j] != sinInput[i][j])
+            for (size_t j = 0; j < offset; j++)
             {
-                std::cout << "sin mismatch at i = " << i << " j = " << j << std::endl;
-                std::cout << "expected: " << cosAngleTerms[i][j].toFloat() << " got: " << cosInput[i][j].toFloat() << std::endl;
-                // return;
+                sinInput[i][j + WINDOW_SIZE - offset] = cosInput[i][j];
+            }
+        }
+        else
+        {
+            for (size_t j = 1; j < WINDOW_SIZE; j++)
+            {
+                sinInput[i][j] = ec_sin(angleConst * i * j);
             }
         }
     }
@@ -283,8 +247,6 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     {
         for (size_t j = 0; j < WINDOW_SIZE; ++j)
         {
-            // const ec::Float angleTerm = angleConst * ec::Float(i) * j;
-
             outputReal[i] += input[j] * cosTerms[i][j];
             outputImag[i] += input[j] * sinTerms[i][j];
         }
