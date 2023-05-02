@@ -32,6 +32,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     std::vector<ec::Float> signalFreqImag(WINDOW_SIZE);
     std::vector<ec::Float> spectrumWindow(sizeSpectrum);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
+
+    // TODO Shrink these to exclude the 1's and 0's and hardcode
     std::vector<std::vector<ec::Float>> cosAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
     std::vector<std::vector<ec::Float>> sinAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
@@ -72,7 +74,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-
+// TODO pipeline and vectorize this
 void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<std::vector<ec::Float>>& sinInput)
 {
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
@@ -130,6 +132,7 @@ void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<
         }
     }
 }
+
 
 /*
     We are computing this operation:
@@ -212,7 +215,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     // stream first cosine into fifo 0
     streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
 
-    // stream second cosing into fifo 3
+    // stream second cosine into fifo 3
     streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 3, WINDOW_SIZE);
 
     // stream output from fifo 5 to memory
@@ -234,23 +237,198 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     outputImag.clear();
     outputImag.resize(WINDOW_SIZE, 0.0f);
 
-    std::vector<ec::Float> indices(WINDOW_SIZE);
-
-    for (size_t i = 0; i < WINDOW_SIZE; ++i)
-    {
-        indices[i] = i;
-    }
-
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
 
-    for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    // outputReal[i] += input[j] * cosTerms[i][j];
+    // outputImag[i] += input[j] * sinTerms[i][j];
+
+    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    streamHw.resetStreamHw();
+
+    streamHw.createFifos(2 * WINDOW_SIZE);
+
+    size_t in_idx = 0;
+    size_t i = 0;
+
+
+    streamHw.addOpMulToPipeline(0, input[0], 1);
+    streamHw.addOpMulToPipeline(2, input[1], 3);
+    streamHw.addOpAddToPipeline(1, 3, 4);
+
+    streamHw.addOpMulToPipeline(5, input[2], 6);
+    streamHw.addOpAddToPipeline(4, 6, 7);
+
+    streamHw.addOpMulToPipeline(8, input[3], 9);
+    streamHw.addOpAddToPipeline(7, 9, 10);
+
+    streamHw.copyToHw(cosTerms[0], 0, WINDOW_SIZE, 0);
+    streamHw.copyToHw(cosTerms[1], 0, WINDOW_SIZE, WINDOW_SIZE);
+    streamHw.copyToHw(cosTerms[2], 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
+    streamHw.copyToHw(cosTerms[3], 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
+
+    streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
+    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
+    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 5, WINDOW_SIZE);
+    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 8, WINDOW_SIZE);
+
+    
+
+    // streamHw.startStreamDataMemToFifo(0, i, WINDOW_SIZE);
+    // streamHw.addOpMulToPipeline(0, input[in_idx], i + 1);
+    // i++;
+    // in_idx++;
+
+    // for (; in_idx < 30; i += 4)
+    // {
+    //     streamHw.addOpMulToPipeline(i + 2, input[in_idx], i + 3);
+    //     streamHw.startStreamDataMemToFifo(0, i + 2, WINDOW_SIZE);
+    //     in_idx++;
+
+    //     streamHw.addOpAddToPipeline(i, i + 3, i + 4);
+    // }
+
+
+    // // costerms to fifo
+
+    // // stream fifo back to memory
+    streamHw.startStreamDataFifoToMem(10, 0, WINDOW_SIZE);
+
+    // copy input to memory
+    //streamHw.copyToHw(input, 0, WINDOW_SIZE, WINDOW_SIZE);
+
+    streamHw.runPipeline();
+
+    streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
+
+    std::cout << "A: " << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
+
+
+    // in_idx = 0;
+    // i = 0;
+
+    // streamHw.startStreamDataMemToFifo(0, i, WINDOW_SIZE);
+    // //streamHw.addOpMulToPipeline(0, input[in_idx], i + 1);
+    // i++;
+    // in_idx++;
+
+    // for (; in_idx < 30; i += 4)
+    // {
+    //     // streamHw.addOpMulToPipeline(i + 2, input[in_idx], i + 3);
+    //     streamHw.startStreamDataMemToFifo(0, i + 2, WINDOW_SIZE);
+    //     in_idx++;
+
+    //     //  streamHw.addOpAddToPipeline(i, i + 3, i + 4);
+    // }
+
+    // streamHw.copyToHw(cosTerms[2], 0, WINDOW_SIZE, 0);
+
+    // streamHw.startStreamDataFifoToMem(i, WINDOW_SIZE, WINDOW_SIZE);
+
+    // // copy input to memory
+    // //streamHw.copyToHw(input, 0, WINDOW_SIZE, WINDOW_SIZE);
+
+    // streamHw.runPipeline();
+
+    // streamHw.copyFromHw(outputReal, WINDOW_SIZE, WINDOW_SIZE, 0);
+
+    // std::cout << "B: " << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
+    // std::vector<ec::Float> test{0.5f, 0.6f, 0.7f, 0.8f};
+
+    // std::vector<ec::Float> in{0.5f, 0.6f, 0.7f, 0.8f};
+
+
+    // streamHw.addOpMulToPipeline(0, in[0], 1);
+    // streamHw.addOpMulToPipeline(2, in[1], 3);
+
+    // streamHw.addOpAddToPipeline(1, 3, 4);
+
+    // streamHw.addOpMulToPipeline(5, in[2], 6);
+    // streamHw.addOpMulToPipeline(7, in[3], 8);
+
+    // streamHw.addOpAddToPipeline(6, 8, 9);
+
+    // streamHw.addOpAddToPipeline(4, 9, 10);
+
+    // streamHw.copyToHw(test, 0, 4, 0);
+
+    // streamHw.startStreamDataMemToFifo(0, 0, 4);
+    // streamHw.startStreamDataMemToFifo(0, 2, 4);
+    // streamHw.startStreamDataMemToFifo(0, 5, 4);
+    // streamHw.startStreamDataMemToFifo(0, 7, 4);
+
+    // streamHw.startStreamDataFifoToMem(10, 5, 4);
+
+    // std::vector<ec::Float> o(4);
+
+    // streamHw.runPipeline();
+
+    // streamHw.copyFromHw(o, 5, 4, 0);
+
+    // std::cout << o[0].toFloat() << " " << o[1].toFloat() << " " << o[2].toFloat() << " " << o[3].toFloat() << std::endl;
+
+
+
+
+
+    // streamHw.resetStreamHw();
+
+    // streamHw.createFifos(2 * WINDOW_SIZE);
+
+
+    // streamHw.addOpAddToPipeline(0, 1, 2);
+
+    // i = 2;
+    // for (; in_idx < WINDOW_SIZE; i += 5)
+    // {
+    //     streamHw.addOpMulToPipeline(i, input[in_idx], i + 1);
+    //     in_idx++;
+
+    //     streamHw.addOpMulToPipeline(i + 2, input[in_idx], i + 3);
+    //     in_idx++;
+
+    //     streamHw.addOpAddToPipeline(i + 1, i + 3, i + 4);
+    // }
+
+
+
+    // for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    // {
+    //     // copy current output back into mem @ 2*window size
+    //     streamHw.copyToHw(outputReal, 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
+
+    //     // copy next set of cosine terms into mem 0
+    //     streamHw.copyToHw(cosTerms[i], 0, WINDOW_SIZE, 0);
+
+    //     streamHw.runPipeline();
+
+    //     // pull the output from the streamhw so we can push it back
+    //     streamHw.copyFromHw(outputReal, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
+    // }
+
+    //std::cout << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
+
+    outputReal.clear();
+    outputReal.resize(WINDOW_SIZE, 0.0f);
+
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
-        for (size_t j = 0; j < WINDOW_SIZE; ++j)
+        for (size_t j = 0; j < 4; j++)
         {
             outputReal[i] += input[j] * cosTerms[i][j];
             outputImag[i] += input[j] * sinTerms[i][j];
         }
     }
+
+    std::cout << "C: " << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
+
+    // for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // {
+    //     for (size_t j = 0; j < WINDOW_SIZE; j++)
+    //     {
+    //         // outputReal[i] += input[j] * cosTerms[i][j];
+    //          //outputImag[i] += input[j] * sinTerms[i][j];
+    //     }
+    // }
 
     return;
 }

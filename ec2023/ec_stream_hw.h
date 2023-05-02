@@ -439,6 +439,7 @@ namespace ec
 
     inline void addOpMulToPipeline(uint32_t inputFifoLeftId, ec::Float scalarRight, uint32_t outputFifoId)
     {
+        //std::cout << "size: " << m_operations.size() << std::endl;
       if (m_operations.size() >= MAX_NUM_OPERATIONS)
         throw std::runtime_error("Maximum number of operations at StreamHw was reached. See MAX_NUM_OPERATIONS limitation of StreamHw.");
 
