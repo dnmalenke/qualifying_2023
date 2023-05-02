@@ -232,16 +232,6 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     assert(input.size() == WINDOW_SIZE);
     // but we should double check that
 
-    outputReal.clear();
-    outputReal.resize(WINDOW_SIZE, 0.0f);
-    outputImag.clear();
-    outputImag.resize(WINDOW_SIZE, 0.0f);
-
-    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
-
-    // outputReal[i] += input[j] * cosTerms[i][j];
-    // outputImag[i] += input[j] * sinTerms[i][j];
-
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
     streamHw.resetStreamHw();
 
@@ -272,7 +262,6 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     streamHw.runPipeline();
 
     streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
-
 
     streamHw.copyToHw(sinTerms[0], 0, WINDOW_SIZE, 0);
     streamHw.copyToHw(sinTerms[1], 0, WINDOW_SIZE, WINDOW_SIZE);
@@ -338,22 +327,6 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
 
         streamHw.copyFromHw(outputImag, 0, WINDOW_SIZE, 0);
     }
-
-  //  std::cout << "A: " << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
-
-    // outputReal.clear();
-    // outputReal.resize(WINDOW_SIZE, 0.0f);
-
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
-    {
-        for (size_t j = 0; j < WINDOW_SIZE; j++)
-        {
-          //  outputReal[i] += input[j] * cosTerms[i][j];
-           // outputImag[i] += input[j] * sinTerms[i][j];
-        }
-    }
-
-    // std::cout << "C: " << outputReal[0].toFloat() << " " << outputReal[1].toFloat() << " " << outputReal[2].toFloat() << " " << outputReal[3].toFloat() << std::endl;
 
     return;
 }
