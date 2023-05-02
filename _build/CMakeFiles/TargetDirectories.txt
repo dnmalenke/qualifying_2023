@@ -1,0 +1,3 @@
+/mnt/c/Users/dnmal/source/repos/qualifiying_2023/_build/CMakeFiles/rebuild_cache.dir
+/mnt/c/Users/dnmal/source/repos/qualifiying_2023/_build/CMakeFiles/edit_cache.dir
+/mnt/c/Users/dnmal/source/repos/qualifiying_2023/_build/CMakeFiles/EC2023.dir

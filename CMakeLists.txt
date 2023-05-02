@@ -1,0 +1,50 @@
+cmake_minimum_required(VERSION 3.15)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+if(WIN32)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+else()
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+endif()
+foreach(CFG IN LISTS CMAKE_CONFIGURATION_TYPES)
+    string(TOUPPER "${CFG}" CFG)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CFG} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CFG} "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CFG} "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+endforeach()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+project(EC2023 LANGUAGES CXX)
+
+add_executable(${PROJECT_NAME}
+    ${CMAKE_CURRENT_LIST_DIR}/main.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/solution.h)
+
+target_sources(${PROJECT_NAME}
+    PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec2023.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_measurement.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_float.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_vec_hw.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_stream_hw.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_signal_reader.h
+    ${CMAKE_CURRENT_LIST_DIR}/ec2023/ec_math.h
+    ${CMAKE_CURRENT_LIST_DIR}/solution.h)
+
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR})
+
+
+add_custom_command(TARGET ${PROJECT_NAME}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_LIST_DIR}/input_signal.txt"
+    "${CMAKE_BINARY_DIR}/bin/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_LIST_DIR}/reference_spectrum.txt"
+    "${CMAKE_BINARY_DIR}/bin/")
+
