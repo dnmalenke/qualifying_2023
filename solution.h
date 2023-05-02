@@ -16,11 +16,12 @@ static const ec::Float PI = 3.14159265358979323846f;
 
 
 void init_blackmanCoefs(std::vector<ec::Float>& input);
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
+void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<std::vector<ec::Float>>& sinInput);
+void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<std::vector<ec::Float>>& cosTerms, std::vector<std::vector<ec::Float>>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
-    const size_t numSamples = inputSignal.size();
+    const size_t numSamples = inputSignal.size(); // assume divisible by 32
     const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
     const size_t stepBetweenWins = static_cast<size_t>(ceil(WINDOW_SIZE * (1 - OVERLAP_RATIO)));
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
@@ -31,11 +32,14 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     std::vector<ec::Float> signalFreqImag(WINDOW_SIZE);
     std::vector<ec::Float> spectrumWindow(sizeSpectrum);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
+    std::vector<std::vector<ec::Float>> cosAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
+    std::vector<std::vector<ec::Float>> sinAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
 
     init_blackmanCoefs(blackmanCoefs);
+    init_angleTerms(cosAngleTerms, sinAngleTerms);
 
     for (size_t j = 0; j < numWins; j++)
     {
@@ -44,7 +48,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
         }
 
-        compute_fourier_transform(signalWindow, signalFreqReal, signalFreqImag);
+        compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
@@ -68,12 +72,107 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
+
+void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<std::vector<ec::Float>>& sinInput)
+{
+    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
+
+    //TODO: SKIP 0th because we're multiplying by 0. cos(0) = 1, sin(0) = 0
+
+    // ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    // streamHw.resetStreamHw();
+
+    // only calculate half of i/WINDOW_SIZE elements because it inverts and repeats after that
+
+    // return;
+
+    // for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    // {
+    //     if (i == 0)
+    //     {
+    //         for (size_t j = 0; j < WINDOW_SIZE; ++j)
+    //         {
+    //             cosInput[i][j] = 1;
+    //         }
+
+    //         continue;
+    //     }
+
+    //     size_t calc_win = WINDOW_SIZE / (1 * i);
+
+    //     if (WINDOW_SIZE % i == 0)
+    //     {
+    //         for (size_t j = 0; j < calc_win + 1; ++j)
+    //         {
+    //             cosInput[i][j] = ec_cos(angleConst * i * j);
+    //         }
+
+    //         for (size_t j = 1; j < i; j++)
+    //         {
+    //             // QUARTER WAVE FLIP IMPLEMENATION. DOES NOT WORK DUE TO FLOAT PRECISION
+    //             // for (size_t k = 1; k < calc_win; k++)
+    //             // {
+    //             //     cosInput[i][k + calc_win] = ec::Float(-1.0f) * cosInput[i][calc_win - k];
+    //             //     cosInput[i][k + 3 * calc_win] = cosInput[i][calc_win - k];
+    //             // }
+
+    //             // for (size_t k = 0; k < calc_win; k++)
+    //             // {
+    //             //     cosInput[i][k + 2 * calc_win] = cosInput[i][2 * calc_win - k];
+    //             // }
+
+    //             for (size_t k = 0; k < calc_win; k++)
+    //             {
+    //                 cosInput[i][j * calc_win + k] = cosInput[i][j * calc_win - k];
+    //             }
+    //         }
+    //     }
+    //     else
+    //     {
+    //         for (size_t j = 0; j < WINDOW_SIZE; ++j)
+    //         {
+    //             cosInput[i][j] = ec_cos(angleConst * i * j);
+    //         }
+    //     }
+    // }
+
+    std::vector<std::vector<ec::Float>> cosAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE + 512));
+    std::vector<std::vector<ec::Float>> sinAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
+
+    for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    {
+        for (size_t j = 0; j < WINDOW_SIZE + WINDOW_SIZE / (4*i); ++j)
+        {
+            cosAngleTerms[i][j] = ec_cos(angleConst * i * j);
+        }
+
+        for (size_t j = 0; j < WINDOW_SIZE; j++)
+        {
+            if (WINDOW_SIZE % i == 0)
+            {
+                
+            }
+            else
+            {
+                sinInput[i][j] = ec_sin(angleConst * i * j);
+            }
+
+            if (sinAngleTerms[i][j] != sinInput[i][j])
+            {
+                std::cout << "sin mismatch at i = " << i << " j = " << j << std::endl;
+                std::cout << "expected: " << cosAngleTerms[i][j].toFloat() << " got: " << cosInput[i][j].toFloat() << std::endl;
+                // return;
+            }
+        }
+    }
+}
+
 /*
     We are computing this operation:
-    
+
     ec::Float blackmanWinCoef = 0.42f - 0.5f * ec_cos(ec::Float(i) * 2.0f * PI / (WINDOW_SIZE - 1));
-    blackmanWinCoef = blackmanWinCoef + 0.08f * ec_cos(ec::Float(i) * 4.0f * PI / (WINDOW_SIZE - 1));   
-    
+    blackmanWinCoef = blackmanWinCoef + 0.08f * ec_cos(ec::Float(i) * 4.0f * PI / (WINDOW_SIZE - 1));
+
     across the entire input vector.
     this will in-place modify the input vector.
 
@@ -87,29 +186,30 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     assert(input.size() == WINDOW_SIZE);
     // but we should double check that
 
-    std::vector<ec::Float> indices(WINDOW_SIZE);
-
     const ec::Float c1 = 2.0f * PI / (WINDOW_SIZE - 1);
     const ec::Float c2 = 2 * c1;
 
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // micro optimization, we can skip 0 because vecHw memory is reset to 0
+    for (size_t i = 1; i < WINDOW_SIZE; ++i)
     {
-        indices[i] = i;
+        input[i] = i;
     }
-    
-    vecHw.copyToHw(indices, 0, WINDOW_SIZE, 0);
 
+    vecHw.copyToHw(input, 1, WINDOW_SIZE - 1, 1);
+
+    // TODO see if we can pipeline this to be faster
     // multiplaction by constants
-    for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
+    for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
     {
         vecHw.mul32(32 * i, c2, WINDOW_SIZE + 32 * i);
         vecHw.mul32(32 * i, c1, 32 * i);
     }
 
     // in-place cosine operations
-    for (size_t i = 0; i < WINDOW_SIZE / 4; i++)
+    //TODO: COS WILL REPEAT EVENTUALLY
+    for (size_t i = 0; i < WINDOW_SIZE / 4; ++i)
     {
-        vecHw.cos4(4 * i,  4 * i);
+        vecHw.cos4(4 * i, 4 * i);
         vecHw.cos4(WINDOW_SIZE + 4 * i, WINDOW_SIZE + 4 * i);
     }
 
@@ -128,7 +228,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     streamHw.copyToHw(cosOut, 0, 2 * WINDOW_SIZE, 0);
 
     streamHw.createFifos(6);
-    
+
     ec::Float s1(-0.5f);
     ec::Float s2(0.42f);
     ec::Float s3(0.08f);
@@ -138,7 +238,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
 
     // 0.42 + first cosine
     streamHw.addOpAddToPipeline(1, s2, 2);
-    
+
     // 0.08 * second cosine
     streamHw.addOpMulToPipeline(3, s3, 4);
 
@@ -159,23 +259,34 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     streamHw.copyFromHw(input, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
 }
 
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag)
+void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<std::vector<ec::Float>>& cosTerms, std::vector<std::vector<ec::Float>>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag)
 {
-    size_t inputSize = input.size();
+    // we will be assuming input will be size WINDOW_SIZE
+    assert(input.size() == WINDOW_SIZE);
+    // but we should double check that
 
     outputReal.clear();
-    outputReal.resize(inputSize, 0.0f);
+    outputReal.resize(WINDOW_SIZE, 0.0f);
     outputImag.clear();
-    outputImag.resize(inputSize, 0.0f);
+    outputImag.resize(WINDOW_SIZE, 0.0f);
 
-    for (size_t i = 0; i < inputSize; ++i)
+    std::vector<ec::Float> indices(WINDOW_SIZE);
+
+    for (size_t i = 0; i < WINDOW_SIZE; ++i)
     {
-        for (size_t j = 0; j < inputSize; ++j)
-        {
-            const ec::Float angleTerm = (-2.0f * PI) * ec::Float(i) * j * (1.0f / ec::Float(inputSize));
+        indices[i] = i;
+    }
 
-            outputReal[i] += input[j] * ec_cos(angleTerm);
-            outputImag[i] += input[j] * ec_sin(angleTerm);
+    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
+
+    for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    {
+        for (size_t j = 0; j < WINDOW_SIZE; ++j)
+        {
+            // const ec::Float angleTerm = angleConst * ec::Float(i) * j;
+
+            outputReal[i] += input[j] * cosTerms[i][j];
+            outputImag[i] += input[j] * sinTerms[i][j];
         }
     }
 

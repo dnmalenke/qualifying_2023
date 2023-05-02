@@ -79,13 +79,13 @@ namespace ec
     friend Float ec_log10(Float input);
     friend Float ec_pow(Float base, Float exp);
     
-
+float toFloat()const  noexcept; 
   private:
 
    
     float m_value = 0.0f;
     
-    float toFloat()const  noexcept;
+    
   };
 
 
