@@ -15,4 +15,6 @@ fi
 cd bin
 if  ./EC2023; then
     cat ./scores.json
+else
+    cat ./scores.json
 fi

@@ -14,9 +14,6 @@ static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
 
-
-
-
 void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput);
 void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
@@ -41,22 +38,25 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     size_t idxStartWin = 0;
 
-    init_blackmanCoefs(blackmanCoefs);
-    init_angleTerms(cosAngleTerms, sinAngleTerms);
+    init_blackmanCoefs(blackmanCoefs); // 0.02466%
+    init_angleTerms(cosAngleTerms, sinAngleTerms); // 12.56270%
 
     const ec::Float spC0((float)(10.0f / log(10.0f)));
     const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
     const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
     for (size_t j = 0; j < numWins; j++)
-    {
+    {   
+        // 0.05128%
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
         }
 
+        // 87.14811%
         compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
+        // 0.21287%
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
             ec::Float freqVal = signalFreqReal[i] * signalFreqReal[i] + signalFreqImag[i] * signalFreqImag[i];
