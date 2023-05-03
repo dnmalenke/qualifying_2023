@@ -9,18 +9,18 @@
 #include <iomanip>
 #include <vector>
 #include <cassert>
-#include <complex>
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
-std::complex<double> I(0, 1); // Define imaginary unit i
 
 void init_blackmanCoefs(std::vector<ec::Float>& input);
-void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput);
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
+void init_angleTerms();
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
+
+static std::vector<ec::Float> cosAngleTerms(2 * WINDOW_SIZE);
+static std::vector<ec::Float> sinAngleTerms(2 * WINDOW_SIZE);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -30,20 +30,14 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
     std::vector<ec::Float> signalWindow(WINDOW_SIZE);
-    std::vector<ec::Float> signalFreqReal(WINDOW_SIZE);
-    std::vector<ec::Float> signalFreqImag(WINDOW_SIZE);
-    std::vector<ec::Float> spectrumWindow(sizeSpectrum);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
-    // TODO Shrink these to exclude the 1's and 0's and hardcode
-    std::vector<ec::Float> cosAngleTerms(WINDOW_SIZE * WINDOW_SIZE);
-    std::vector<ec::Float> sinAngleTerms(WINDOW_SIZE * WINDOW_SIZE);
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
 
-    init_blackmanCoefs(blackmanCoefs); // 0.04422%
-    // init_angleTerms(cosAngleTerms, sinAngleTerms); // 22.54289%
+    init_blackmanCoefs(blackmanCoefs); 
+    init_angleTerms();
 
     const ec::Float spC0((float)(10.0f / log(10.0f)));
     const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -51,26 +45,18 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     for (size_t j = 0; j < numWins; j++)
     {
-        // 0.1%
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
         }
-
-        // 76.93869%
-        //compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
-
+        
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
         fft(signalWindow, inImag, WINDOW_SIZE);
 
-        signalFreqReal = signalWindow;
-        signalFreqImag = inImag;
-
-        // 0.42%
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalFreqReal[i] * signalFreqReal[i] + signalFreqImag[i] * signalFreqImag[i];
+            ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
             freqVal = ec_log(freqVal);
             freqVal *= spC0;
 
@@ -99,8 +85,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         return;
     }
 
-    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float((float)count));
-
     std::vector<ec::Float> even(count / 2);
     std::vector<ec::Float> odd(count / 2);
     std::vector<ec::Float> evenI(count / 2);
@@ -119,53 +103,39 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     for (size_t k = 0; k < count / 2; k++)
     {
-        ec::Float co = ec_cos(angleConst * k);
-        ec::Float si = ec_sin(angleConst * k);
+        ec::Float co = cosAngleTerms[WINDOW_SIZE - count + k];
+        ec::Float si = sinAngleTerms[WINDOW_SIZE - count + k];
 
-        inputReal[k] = even[k] + (co * odd[k] - si * oddI[k]);
-        inputImag[k] = evenI[k] + (co * oddI[k] + si * odd[k]);
+        ec::Float c1 = (co * odd[k] - si * oddI[k]);
+        ec::Float c2 = (co * oddI[k] + si * odd[k]);
 
-        inputReal[count / 2 + k] = even[k] - (co * odd[k] - si * oddI[k]);
-        inputImag[count / 2 + k] = evenI[k] - (co * oddI[k] + si * odd[k]);
+        inputReal[k] = even[k] + c1;
+        inputImag[k] = evenI[k] + c2;
+
+        inputReal[count / 2 + k] = even[k] - c1;
+        inputImag[count / 2 + k] = evenI[k] - c2;
     }
 }
 
-void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput)
+void init_angleTerms()
 {
-    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
+    size_t count = WINDOW_SIZE;
 
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.resetMemTo0();
+    size_t idx = 0;
 
-    for (size_t i = 1; i < WINDOW_SIZE; ++i)
+    while (count >= 2)
     {
-        cosInput[i] = i;
-    }
+        ec::Float aC = (-2.0f * PI) * (1.0f / ec::Float(count));
 
-    vecHw.copyToHw(cosInput, 1, WINDOW_SIZE - 1, 1);
-
-    for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
-    {
-        vecHw.mul32(32 * i, angleConst, 32 * i);
-    }
-
-    for (size_t j = 0; j < WINDOW_SIZE; j++)
-    {
-        ec::Float jC((float)j);
-
-        for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
+        for (size_t i = 0; i < count / 2; i++)
         {
-            vecHw.mul32(32 * i, jC, 32 * i + WINDOW_SIZE);
+            cosAngleTerms[idx] = ec_cos(aC * i);
+            sinAngleTerms[idx] = ec_sin(aC * i);
+
+            idx++;
         }
 
-        for (size_t i = 0; i < WINDOW_SIZE / 4; ++i)
-        {
-            vecHw.sin4(WINDOW_SIZE + 4 * i, 2 * WINDOW_SIZE + 4 * i);
-            vecHw.cos4(WINDOW_SIZE + 4 * i, WINDOW_SIZE + 4 * i);
-        }
-
-        vecHw.copyFromHw(cosInput, WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE * j);
-        vecHw.copyFromHw(sinInput, 2 * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE * j);
+        count >>= 1;
     }
 }
 
