@@ -20,12 +20,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput);
 void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag, size_t count);
-
-float ampl(ec::Float re, ec::Float im)
-{
-    return sqrt(re.toFloat() * re.toFloat() + im.toFloat() * im.toFloat());
-}
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -48,7 +43,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     size_t idxStartWin = 0;
 
     init_blackmanCoefs(blackmanCoefs); // 0.04422%
-    init_angleTerms(cosAngleTerms, sinAngleTerms); // 22.54289%
+    // init_angleTerms(cosAngleTerms, sinAngleTerms); // 22.54289%
 
     const ec::Float spC0((float)(10.0f / log(10.0f)));
     const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -63,27 +58,14 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         }
 
         // 76.93869%
-        compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
+        //compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
-        std::vector<ec::Float> outReal(WINDOW_SIZE);
-        std::vector<ec::Float> outImag(WINDOW_SIZE);
+        fft(signalWindow, inImag, WINDOW_SIZE);
 
-        fft(signalWindow, inImag, outReal, outImag, WINDOW_SIZE);
-
-        //  std::cout << "A: " << (signalFreqReal[0] * signalFreqReal[0] + signalFreqImag[0] * signalFreqImag[0]).toFloat() << " " << (signalFreqReal[1] * signalFreqReal[1] + signalFreqImag[1] * signalFreqImag[1]).toFloat() << " " << (signalFreqReal[2] * signalFreqReal[2] + signalFreqImag[2] * signalFreqImag[2]).toFloat() << " " << (signalFreqReal[3] * signalFreqReal[3] + signalFreqImag[3] * signalFreqImag[3]).toFloat() << std::endl;
-        // std::cout << "C: " << signalFreqReal[0].toFloat() << " " << signalFreqReal[1].toFloat() << " " << signalFreqReal[2].toFloat() << " " << signalFreqReal[3].toFloat() << std::endl;
-        // std::cout << "B: " << signalWindow[0].toFloat() << " " << signalWindow[1].toFloat() << " " << signalWindow[2].toFloat() << " " << signalWindow[3].toFloat() << std::endl;
-        // std::cout << "C: " << signalFreqImag[0].toFloat() << " " << signalFreqImag[1].toFloat() << " " << signalFreqImag[2].toFloat() << " " << signalFreqImag[3].toFloat() << std::endl;
-        // std::cout << "I: " << inImag[0].toFloat() << " " << inImag[1].toFloat() << " " << inImag[2].toFloat() << " " << inImag[3].toFloat() << std::endl;
-
-
-        std::cout << "D: " << ampl(signalFreqReal[0], signalFreqImag[0]) << " " << ampl(signalFreqReal[1], signalFreqImag[1]) << " " << ampl(signalFreqReal[2], signalFreqImag[2]) << " " << ampl(signalFreqReal[3], signalFreqImag[3]) << std::endl;
-        std::cout << "D: " << ampl(outReal[0], outImag[0]) << " " << ampl(outReal[1], outImag[1]) << " " << ampl(outReal[2], outImag[2]) << " " << ampl(outReal[3], outImag[3]) << std::endl;
-
-        // signalFreqReal = signalWindow;
-        // signalFreqImag = inImag;
+        signalFreqReal = signalWindow;
+        signalFreqImag = inImag;
 
         // 0.42%
         for (size_t i = 0; i < sizeSpectrum; i++)
@@ -110,12 +92,10 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag, size_t count)
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     if (count == 1)
     {
-        outputReal[0] = inputReal[0];
-        outputImag[0] = inputImag[0];
         return;
     }
 
@@ -134,24 +114,19 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         oddI[i] = inputImag[i * 2 + 1];
     }
 
-    std::vector<ec::Float> evenReal(count / 2);
-    std::vector<ec::Float> evenImag(count / 2);
-    std::vector<ec::Float> oddReal(count / 2);
-    std::vector<ec::Float> oddImag(count / 2);
-
-    fft(even, evenI, evenReal, evenImag, count / 2);
-    fft(odd, oddI, oddReal, oddImag, count / 2);
+    fft(even, evenI, count / 2);
+    fft(odd, oddI, count / 2);
 
     for (size_t k = 0; k < count / 2; k++)
     {
         ec::Float co = ec_cos(angleConst * k);
         ec::Float si = ec_sin(angleConst * k);
 
-        outputReal[k] = evenReal[k] + co * oddReal[k] - si * oddImag[k];
-        outputImag[k] = evenImag[k] + co * oddImag[k] + si * oddReal[k];
+        inputReal[k] = even[k] + (co * odd[k] - si * oddI[k]);
+        inputImag[k] = evenI[k] + (co * oddI[k] + si * odd[k]);
 
-        outputReal[count / 2 + k] = evenReal[k] - co * oddReal[k] - si * oddImag[k];
-        outputReal[count / 2 + k] = evenReal[k] - co * oddImag[k] - si * oddReal[k];
+        inputReal[count / 2 + k] = even[k] - (co * odd[k] - si * oddI[k]);
+        inputImag[count / 2 + k] = evenI[k] - (co * oddI[k] + si * odd[k]);
     }
 }
 
@@ -285,52 +260,3 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
 
     streamHw.copyFromHw(input, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
 }
-
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag)
-{
-    // we will be assuming input will be size WINDOW_SIZE
-    assert(input.size() == WINDOW_SIZE);
-    // but we should double check that
-
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.resetMemTo0();
-
-    vecHw.copyToHw(input, 0, WINDOW_SIZE, 0);
-
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
-    {
-        vecHw.resetMemTo0(WINDOW_SIZE, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(cosTerms, i * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE);
-
-        for (size_t j = 0; j < WINDOW_SIZE / 32; ++j)
-        {
-            vecHw.mul32(32 * j, WINDOW_SIZE + 32 * j, WINDOW_SIZE + 32 * j);
-            vecHw.acc32(WINDOW_SIZE + 32 * j, 2 * WINDOW_SIZE + j);
-        }
-
-        vecHw.acc32(2 * WINDOW_SIZE, 3 * WINDOW_SIZE + i);
-    }
-
-    vecHw.copyFromHw(outputReal, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
-
-    vecHw.resetMemTo0(3 * WINDOW_SIZE, WINDOW_SIZE);
-
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
-    {
-        vecHw.resetMemTo0(WINDOW_SIZE, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(sinTerms, i * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE);
-
-        for (size_t j = 0; j < WINDOW_SIZE / 32; ++j)
-        {
-            vecHw.mul32(32 * j, WINDOW_SIZE + 32 * j, WINDOW_SIZE + 32 * j);
-            vecHw.acc32(WINDOW_SIZE + 32 * j, 2 * WINDOW_SIZE + j);
-        }
-
-        vecHw.acc32(2 * WINDOW_SIZE, 3 * WINDOW_SIZE + i);
-    }
-
-    vecHw.copyFromHw(outputImag, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
-
-    return;
-}
-
