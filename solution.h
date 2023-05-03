@@ -15,9 +15,11 @@ static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
 
 
+
+
 void init_blackmanCoefs(std::vector<ec::Float>& input);
-void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<std::vector<ec::Float>>& sinInput);
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<std::vector<ec::Float>>& cosTerms, std::vector<std::vector<ec::Float>>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
+void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput);
+void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -26,22 +28,26 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const size_t stepBetweenWins = static_cast<size_t>(ceil(WINDOW_SIZE * (1 - OVERLAP_RATIO)));
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
-
     std::vector<ec::Float> signalWindow(WINDOW_SIZE);
     std::vector<ec::Float> signalFreqReal(WINDOW_SIZE);
     std::vector<ec::Float> signalFreqImag(WINDOW_SIZE);
     std::vector<ec::Float> spectrumWindow(sizeSpectrum);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
+    //std::vector<ec::Float> freqVals(WINDOW_SIZE);
 
     // TODO Shrink these to exclude the 1's and 0's and hardcode
-    std::vector<std::vector<ec::Float>> cosAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
-    std::vector<std::vector<ec::Float>> sinAngleTerms(WINDOW_SIZE, std::vector<ec::Float>(WINDOW_SIZE));
+    std::vector<ec::Float> cosAngleTerms(WINDOW_SIZE * WINDOW_SIZE);
+    std::vector<ec::Float> sinAngleTerms(WINDOW_SIZE * WINDOW_SIZE);
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
 
     init_blackmanCoefs(blackmanCoefs);
     init_angleTerms(cosAngleTerms, sinAngleTerms);
+
+    const ec::Float spC0((float)(10.0f / log(10.0f)));
+    const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
+    const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
     for (size_t j = 0; j < numWins; j++)
     {
@@ -52,30 +58,62 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
+        // SLOWER TO STREAM x^2 + y^2
+        // ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+        // streamHw.resetStreamHw();
+
+        // streamHw.createFifos(7);
+
+        // streamHw.addOpMulToPipeline(0, 1, 2);
+        // streamHw.addOpMulToPipeline(3, 4, 5);
+        // streamHw.addOpAddToPipeline(2, 5, 6);
+
+        // streamHw.copyToHw(signalFreqReal, 0, WINDOW_SIZE, 0);
+        // streamHw.copyToHw(signalFreqImag, 0, WINDOW_SIZE, WINDOW_SIZE);
+
+        // streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
+        // streamHw.startStreamDataMemToFifo(0, 1, WINDOW_SIZE);
+        // streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 3, WINDOW_SIZE);
+        // streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 4, WINDOW_SIZE);
+
+        // streamHw.startStreamDataFifoToMem(6, 2 * WINDOW_SIZE, WINDOW_SIZE);
+
+        // streamHw.runPipeline();
+
+        // streamHw.copyFromHw(freqVals,2*WINDOW_SIZE,WINDOW_SIZE,0);
+
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
+            //ec::Float& freqVal = freqVals[i];
             ec::Float freqVal = signalFreqReal[i] * signalFreqReal[i] + signalFreqImag[i] * signalFreqImag[i];
-            freqVal = ec_sqrt(freqVal);
-            freqVal = freqVal / ec::Float(WINDOW_SIZE);
+            freqVal = ec_log(freqVal);
+            freqVal *= spC0;
 
-            if (i > 0 && i < sizeSpectrum - 1) freqVal = freqVal * 2.0f;
+            if (i > 0 && i < sizeSpectrum - 1)
+            {
+                freqVal += spC2;
+            }
+            else
+            {
+                freqVal += spC1;
+            }
 
-            freqVal = freqVal * freqVal;
-
-            freqVal = 10.0f * ec_log10(1000.0f * freqVal);
+            // if (freqVal > outputSpectrum[i])
+            // {
+            //     std::cout <<"i: " << i <<" o: " << outputSpectrum[i].toFloat() << " f: " << freqVal.toFloat() << std::endl;
+            // }
 
             outputSpectrum[i] = ec_max(outputSpectrum[i], freqVal);
         }
 
         idxStartWin += stepBetweenWins;
-
     }
 
     return outputSpectrum;
 }
 
 // TODO pipeline and vectorize this
-void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<std::vector<ec::Float>>& sinInput)
+void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput)
 {
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
 
@@ -89,7 +127,7 @@ void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<
         {
             for (size_t j = 0; j < WINDOW_SIZE; ++j)
             {
-                cosInput[i][j] = 1.0f;
+                cosInput[WINDOW_SIZE * i + j] = 1.0f;
             }
 
             continue;
@@ -100,11 +138,11 @@ void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<
         {
             if (j == 0)
             {
-                cosInput[i][j] = 1.0f;
+                cosInput[WINDOW_SIZE * i + j] = 1.0f;
             }
             else
             {
-                cosInput[i][j] = ec_cos(angleConst * i * j);
+                cosInput[WINDOW_SIZE * i + j] = ec_cos(angleConst * i * j);
             }
         }
 
@@ -115,19 +153,19 @@ void init_angleTerms(std::vector<std::vector<ec::Float>>& cosInput, std::vector<
 
             for (size_t j = 0; j < WINDOW_SIZE - offset; j++)
             {
-                sinInput[i][j] = cosInput[i][j + offset];
+                sinInput[WINDOW_SIZE * i + j] = cosInput[WINDOW_SIZE * i + j + offset];
             }
 
             for (size_t j = 0; j < offset; j++)
             {
-                sinInput[i][j + WINDOW_SIZE - offset] = cosInput[i][j];
+                sinInput[WINDOW_SIZE * i + j + WINDOW_SIZE - offset] = cosInput[WINDOW_SIZE * i + j];
             }
         }
         else
         {
             for (size_t j = 1; j < WINDOW_SIZE; j++)
             {
-                sinInput[i][j] = ec_sin(angleConst * i * j);
+                sinInput[WINDOW_SIZE * i + j] = ec_sin(angleConst * i * j);
             }
         }
     }
@@ -226,7 +264,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     streamHw.copyFromHw(input, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
 }
 
-void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<std::vector<ec::Float>>& cosTerms, std::vector<std::vector<ec::Float>>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag)
+void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag)
 {
     // we will be assuming input will be size WINDOW_SIZE
     assert(input.size() == WINDOW_SIZE);
@@ -247,10 +285,7 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     streamHw.addOpMulToPipeline(8, input[3], 9);
     streamHw.addOpAddToPipeline(7, 9, 10);
 
-    streamHw.copyToHw(cosTerms[0], 0, WINDOW_SIZE, 0);
-    streamHw.copyToHw(cosTerms[1], 0, WINDOW_SIZE, WINDOW_SIZE);
-    streamHw.copyToHw(cosTerms[2], 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
-    streamHw.copyToHw(cosTerms[3], 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
+    streamHw.copyToHw(cosTerms, 0, 4 * WINDOW_SIZE, 0);
 
     streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
     streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
@@ -263,10 +298,7 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
 
     streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
 
-    streamHw.copyToHw(sinTerms[0], 0, WINDOW_SIZE, 0);
-    streamHw.copyToHw(sinTerms[1], 0, WINDOW_SIZE, WINDOW_SIZE);
-    streamHw.copyToHw(sinTerms[2], 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
-    streamHw.copyToHw(sinTerms[3], 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
+    streamHw.copyToHw(sinTerms, 0, 4 * WINDOW_SIZE, 0);
 
     streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
     streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
@@ -294,9 +326,7 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
 
         streamHw.addOpAddToPipeline(7, 8, 9);
 
-        streamHw.copyToHw(cosTerms[i], 0, WINDOW_SIZE, 0);
-        streamHw.copyToHw(cosTerms[i + 1], 0, WINDOW_SIZE, WINDOW_SIZE);
-        streamHw.copyToHw(cosTerms[i + 2], 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
+        streamHw.copyToHw(cosTerms, i * WINDOW_SIZE, 3 * WINDOW_SIZE, 0);
         streamHw.copyToHw(outputReal, 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
 
         streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
@@ -311,9 +341,7 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
         streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
 
         // imaginary terms
-        streamHw.copyToHw(sinTerms[i], 0, WINDOW_SIZE, 0);
-        streamHw.copyToHw(sinTerms[i + 1], 0, WINDOW_SIZE, WINDOW_SIZE);
-        streamHw.copyToHw(sinTerms[i + 2], 0, WINDOW_SIZE, 2 * WINDOW_SIZE);
+        streamHw.copyToHw(sinTerms, i * WINDOW_SIZE, 3 * WINDOW_SIZE, 0);
         streamHw.copyToHw(outputImag, 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
 
         streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
