@@ -46,7 +46,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
     for (size_t j = 0; j < numWins; j++)
-    {   
+    {
         // 0.05128%
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
@@ -101,7 +101,7 @@ void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& s
         vecHw.mul32(32 * i, angleConst, 32 * i);
     }
 
-    for (size_t j = 1; j < WINDOW_SIZE; j++)
+    for (size_t j = 0; j < WINDOW_SIZE; j++)
     {
         ec::Float jC((float)j);
 
@@ -219,92 +219,44 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
     assert(input.size() == WINDOW_SIZE);
     // but we should double check that
 
-    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-    streamHw.resetStreamHw();
+    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+    vecHw.resetMemTo0();
 
-    streamHw.createFifos(11);
+    vecHw.copyToHw(input, 0, WINDOW_SIZE, 0);
 
-    streamHw.addOpMulToPipeline(0, input[0], 1);
-    streamHw.addOpMulToPipeline(2, input[1], 3);
-    streamHw.addOpAddToPipeline(1, 3, 4);
-
-    streamHw.addOpMulToPipeline(5, input[2], 6);
-    streamHw.addOpAddToPipeline(4, 6, 7);
-
-    streamHw.addOpMulToPipeline(8, input[3], 9);
-    streamHw.addOpAddToPipeline(7, 9, 10);
-
-    streamHw.copyToHw(cosTerms, 0, 4 * WINDOW_SIZE, 0);
-
-    streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 5, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 8, WINDOW_SIZE);
-
-    streamHw.startStreamDataFifoToMem(10, 0, WINDOW_SIZE);
-
-    streamHw.runPipeline();
-
-    streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
-
-    streamHw.copyToHw(sinTerms, 0, 4 * WINDOW_SIZE, 0);
-
-    streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 5, WINDOW_SIZE);
-    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 8, WINDOW_SIZE);
-
-    streamHw.startStreamDataFifoToMem(10, 0, WINDOW_SIZE);
-
-    streamHw.runPipeline();
-
-    streamHw.copyFromHw(outputImag, 0, WINDOW_SIZE, 0);
-
-    for (size_t i = 4; i < WINDOW_SIZE; i += 3)
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
-        streamHw.resetStreamHw();
+        vecHw.resetMemTo0(WINDOW_SIZE, 2 * WINDOW_SIZE);
+        vecHw.copyToHw(cosTerms, i * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE);
 
-        streamHw.createFifos(10);
+        for (size_t j = 0; j < WINDOW_SIZE / 32; ++j)
+        {
+            vecHw.mul32(32 * j, WINDOW_SIZE + 32 * j, WINDOW_SIZE + 32 * j);
+            vecHw.acc32(WINDOW_SIZE + 32 * j, 2 * WINDOW_SIZE + j);
+        }
 
-        streamHw.addOpMulToPipeline(0, input[i], 1);
-        streamHw.addOpMulToPipeline(2, input[i + 1], 3);
-        streamHw.addOpAddToPipeline(1, 3, 4);
-
-        streamHw.addOpMulToPipeline(5, input[i + 2], 6);
-        streamHw.addOpAddToPipeline(4, 6, 7);
-
-        streamHw.addOpAddToPipeline(7, 8, 9);
-
-        streamHw.copyToHw(cosTerms, i * WINDOW_SIZE, 3 * WINDOW_SIZE, 0);
-        streamHw.copyToHw(outputReal, 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
-
-        streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 5, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 8, WINDOW_SIZE);
-
-        streamHw.startStreamDataFifoToMem(9, 0, WINDOW_SIZE);
-
-        streamHw.runPipeline();
-
-        streamHw.copyFromHw(outputReal, 0, WINDOW_SIZE, 0);
-
-        // imaginary terms
-        streamHw.copyToHw(sinTerms, i * WINDOW_SIZE, 3 * WINDOW_SIZE, 0);
-        streamHw.copyToHw(outputImag, 0, WINDOW_SIZE, 3 * WINDOW_SIZE);
-
-        streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 2, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 5, WINDOW_SIZE);
-        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 8, WINDOW_SIZE);
-
-        streamHw.startStreamDataFifoToMem(9, 0, WINDOW_SIZE);
-
-        streamHw.runPipeline();
-
-        streamHw.copyFromHw(outputImag, 0, WINDOW_SIZE, 0);
+        vecHw.acc32(2 * WINDOW_SIZE, 3 * WINDOW_SIZE + i);
     }
+
+    vecHw.copyFromHw(outputReal, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
+
+    vecHw.resetMemTo0(3 * WINDOW_SIZE, WINDOW_SIZE);
+
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
+    {
+        vecHw.resetMemTo0(WINDOW_SIZE, 2 * WINDOW_SIZE);
+        vecHw.copyToHw(sinTerms, i * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE);
+
+        for (size_t j = 0; j < WINDOW_SIZE / 32; ++j)
+        {
+            vecHw.mul32(32 * j, WINDOW_SIZE + 32 * j, WINDOW_SIZE + 32 * j);
+            vecHw.acc32(WINDOW_SIZE + 32 * j, 2 * WINDOW_SIZE + j);
+        }
+
+        vecHw.acc32(2 * WINDOW_SIZE, 3 * WINDOW_SIZE + i);
+    }
+
+    vecHw.copyFromHw(outputImag, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
 
     return;
 }
-
