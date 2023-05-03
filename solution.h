@@ -19,8 +19,8 @@ void init_angleTerms();
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
 
-static std::vector<ec::Float> cosAngleTerms(2 * WINDOW_SIZE);
-static std::vector<ec::Float> sinAngleTerms(2 * WINDOW_SIZE);
+static std::vector<ec::Float> cosAngleTerms(WINDOW_SIZE);
+static std::vector<ec::Float> sinAngleTerms(WINDOW_SIZE);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -36,7 +36,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     size_t idxStartWin = 0;
 
-    init_blackmanCoefs(blackmanCoefs); 
+    init_blackmanCoefs(blackmanCoefs);
     init_angleTerms();
 
     const ec::Float spC0((float)(10.0f / log(10.0f)));
@@ -49,7 +49,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
         }
-        
+
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
         fft(signalWindow, inImag, WINDOW_SIZE);
@@ -80,40 +80,67 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
-    if (count == 1)
-    {
-        return;
-    }
-
     std::vector<ec::Float> even(count / 2);
     std::vector<ec::Float> odd(count / 2);
     std::vector<ec::Float> evenI(count / 2);
     std::vector<ec::Float> oddI(count / 2);
 
-    for (size_t i = 0; i < count / 2; i++)
+    if (count > 4)
     {
-        even[i] = inputReal[i * 2];
-        evenI[i] = inputImag[i * 2];
-        odd[i] = inputReal[i * 2 + 1];
-        oddI[i] = inputImag[i * 2 + 1];
+        for (size_t i = 0; i < count / 2; i++)
+        {
+            even[i] = inputReal[i * 2];
+            evenI[i] = inputImag[i * 2];
+
+            odd[i] = inputReal[i * 2 + 1];
+            oddI[i] = inputImag[i * 2 + 1];
+        }
+
+        fft(even, evenI, count / 2);
+        fft(odd, oddI, count / 2);
+    }
+    else
+    {
+        even[0] = inputReal[0] + inputReal[2];
+        evenI[0] = inputImag[0] + inputImag[2];
+
+        even[1] = inputReal[0] - inputReal[2];
+        evenI[1] = inputImag[0] - inputImag[2];
+
+        odd[0] = inputReal[1] + inputReal[3];
+        oddI[0] = inputImag[1] + inputImag[3];
+
+        odd[1] = inputReal[1] - inputReal[3];
+        oddI[1] = inputImag[1] - inputImag[3];
     }
 
-    fft(even, evenI, count / 2);
-    fft(odd, oddI, count / 2);
+    inputReal[0] = even[0] + odd[0];
+    inputImag[0] = evenI[0] + oddI[0];
 
-    for (size_t k = 0; k < count / 2; k++)
+    inputReal[count / 2] = even[0] - odd[0];
+    inputImag[count / 2] = evenI[0] - oddI[0];
+
+    if (count / 2 >= 256 && false)
     {
-        ec::Float co = cosAngleTerms[WINDOW_SIZE - count + k];
-        ec::Float si = sinAngleTerms[WINDOW_SIZE - count + k];
+        ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+        vecHw.resetMemTo0();
+    }
+    else
+    {
+        for (size_t k = 1; k < count / 2; k++)
+        {
+            ec::Float co = cosAngleTerms[WINDOW_SIZE - count + k];
+            ec::Float si = sinAngleTerms[WINDOW_SIZE - count + k];
 
-        ec::Float c1 = (co * odd[k] - si * oddI[k]);
-        ec::Float c2 = (co * oddI[k] + si * odd[k]);
+            ec::Float c1 = (co * odd[k] - si * oddI[k]);
+            ec::Float c2 = (co * oddI[k] + si * odd[k]);
 
-        inputReal[k] = even[k] + c1;
-        inputImag[k] = evenI[k] + c2;
+            inputReal[k] = even[k] + c1;
+            inputImag[k] = evenI[k] + c2;
 
-        inputReal[count / 2 + k] = even[k] - c1;
-        inputImag[count / 2 + k] = evenI[k] - c2;
+            inputReal[count / 2 + k] = even[k] - c1;
+            inputImag[count / 2 + k] = evenI[k] - c2;
+        }
     }
 }
 
@@ -125,12 +152,15 @@ void init_angleTerms()
 
     while (count >= 2)
     {
-        ec::Float aC = (-2.0f * PI) * (1.0f / ec::Float(count));
+        ec::Float aC = (-2.0f * PI) * (1.0f / count);
 
         for (size_t i = 0; i < count / 2; i++)
         {
-            cosAngleTerms[idx] = ec_cos(aC * i);
-            sinAngleTerms[idx] = ec_sin(aC * i);
+            if (i != 0)
+            {
+                cosAngleTerms[idx] = ec_cos(aC * i);
+                sinAngleTerms[idx] = ec_sin(aC * i);
+            }
 
             idx++;
         }
