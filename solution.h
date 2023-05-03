@@ -33,7 +33,6 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     std::vector<ec::Float> signalFreqImag(WINDOW_SIZE);
     std::vector<ec::Float> spectrumWindow(sizeSpectrum);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
-    //std::vector<ec::Float> freqVals(WINDOW_SIZE);
 
     // TODO Shrink these to exclude the 1's and 0's and hardcode
     std::vector<ec::Float> cosAngleTerms(WINDOW_SIZE * WINDOW_SIZE);
@@ -58,33 +57,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
-        // SLOWER TO STREAM x^2 + y^2
-        // ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-        // streamHw.resetStreamHw();
-
-        // streamHw.createFifos(7);
-
-        // streamHw.addOpMulToPipeline(0, 1, 2);
-        // streamHw.addOpMulToPipeline(3, 4, 5);
-        // streamHw.addOpAddToPipeline(2, 5, 6);
-
-        // streamHw.copyToHw(signalFreqReal, 0, WINDOW_SIZE, 0);
-        // streamHw.copyToHw(signalFreqImag, 0, WINDOW_SIZE, WINDOW_SIZE);
-
-        // streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-        // streamHw.startStreamDataMemToFifo(0, 1, WINDOW_SIZE);
-        // streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 3, WINDOW_SIZE);
-        // streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 4, WINDOW_SIZE);
-
-        // streamHw.startStreamDataFifoToMem(6, 2 * WINDOW_SIZE, WINDOW_SIZE);
-
-        // streamHw.runPipeline();
-
-        // streamHw.copyFromHw(freqVals,2*WINDOW_SIZE,WINDOW_SIZE,0);
-
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            //ec::Float& freqVal = freqVals[i];
             ec::Float freqVal = signalFreqReal[i] * signalFreqReal[i] + signalFreqImag[i] * signalFreqImag[i];
             freqVal = ec_log(freqVal);
             freqVal *= spC0;
@@ -97,11 +71,6 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
             {
                 freqVal += spC1;
             }
-
-            // if (freqVal > outputSpectrum[i])
-            // {
-            //     std::cout <<"i: " << i <<" o: " << outputSpectrum[i].toFloat() << " f: " << freqVal.toFloat() << std::endl;
-            // }
 
             outputSpectrum[i] = ec_max(outputSpectrum[i], freqVal);
         }
@@ -117,60 +86,40 @@ void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& s
 {
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
 
-    // ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-    // streamHw.resetStreamHw();
+    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+    vecHw.resetMemTo0();
 
-
-    for (size_t i = 0; i < WINDOW_SIZE; ++i)
+    for (size_t i = 1; i < WINDOW_SIZE; ++i)
     {
-        if (i == 0)
-        {
-            for (size_t j = 0; j < WINDOW_SIZE; ++j)
-            {
-                cosInput[WINDOW_SIZE * i + j] = 1.0f;
-            }
+        cosInput[i] = i;
+    }
 
-            continue;
+    vecHw.copyToHw(cosInput, 1, WINDOW_SIZE - 1, 1);
+
+    for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
+    {
+        vecHw.mul32(32 * i, angleConst, 32 * i);
+    }
+
+    for (size_t j = 1; j < WINDOW_SIZE; j++)
+    {
+        ec::Float jC((float)j);
+
+        for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
+        {
+            vecHw.mul32(32 * i, jC, 32 * i + WINDOW_SIZE);
         }
 
-        // i != 0 from now on
-        for (size_t j = 0; j < WINDOW_SIZE; ++j)
+        for (size_t i = 0; i < WINDOW_SIZE / 4; ++i)
         {
-            if (j == 0)
-            {
-                cosInput[WINDOW_SIZE * i + j] = 1.0f;
-            }
-            else
-            {
-                cosInput[WINDOW_SIZE * i + j] = ec_cos(angleConst * i * j);
-            }
+            vecHw.sin4(WINDOW_SIZE + 4 * i, 2 * WINDOW_SIZE + 4 * i);
+            vecHw.cos4(WINDOW_SIZE + 4 * i, WINDOW_SIZE + 4 * i);
         }
 
-        // sin is just an offset of cos. let's take advantage of that
-        if (WINDOW_SIZE % (4 * i) == 0)
-        {
-            size_t offset = WINDOW_SIZE / (4 * i);
-
-            for (size_t j = 0; j < WINDOW_SIZE - offset; j++)
-            {
-                sinInput[WINDOW_SIZE * i + j] = cosInput[WINDOW_SIZE * i + j + offset];
-            }
-
-            for (size_t j = 0; j < offset; j++)
-            {
-                sinInput[WINDOW_SIZE * i + j + WINDOW_SIZE - offset] = cosInput[WINDOW_SIZE * i + j];
-            }
-        }
-        else
-        {
-            for (size_t j = 1; j < WINDOW_SIZE; j++)
-            {
-                sinInput[WINDOW_SIZE * i + j] = ec_sin(angleConst * i * j);
-            }
-        }
+        vecHw.copyFromHw(cosInput, WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE * j);
+        vecHw.copyFromHw(sinInput, 2 * WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE * j);
     }
 }
-
 
 /*
     We are computing this operation:
