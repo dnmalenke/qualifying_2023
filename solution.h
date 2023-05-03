@@ -9,14 +9,23 @@
 #include <iomanip>
 #include <vector>
 #include <cassert>
+#include <complex>
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
+std::complex<double> I(0, 1); // Define imaginary unit i
 
 void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput);
 void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<ec::Float>& cosTerms, std::vector<ec::Float>& sinTerms, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag);
+
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag, size_t count);
+
+float ampl(ec::Float re, ec::Float im)
+{
+    return sqrt(re.toFloat() * re.toFloat() + im.toFloat() * im.toFloat());
+}
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -38,8 +47,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     size_t idxStartWin = 0;
 
-    init_blackmanCoefs(blackmanCoefs); // 0.02466%
-    init_angleTerms(cosAngleTerms, sinAngleTerms); // 12.56270%
+    init_blackmanCoefs(blackmanCoefs); // 0.04422%
+    init_angleTerms(cosAngleTerms, sinAngleTerms); // 22.54289%
 
     const ec::Float spC0((float)(10.0f / log(10.0f)));
     const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -47,16 +56,36 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     for (size_t j = 0; j < numWins; j++)
     {
-        // 0.05128%
+        // 0.1%
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
         }
 
-        // 87.14811%
+        // 76.93869%
         compute_fourier_transform(signalWindow, cosAngleTerms, sinAngleTerms, signalFreqReal, signalFreqImag);
 
-        // 0.21287%
+        std::vector<ec::Float> inImag(WINDOW_SIZE);
+
+        std::vector<ec::Float> outReal(WINDOW_SIZE);
+        std::vector<ec::Float> outImag(WINDOW_SIZE);
+
+        fft(signalWindow, inImag, outReal, outImag, WINDOW_SIZE);
+
+        //  std::cout << "A: " << (signalFreqReal[0] * signalFreqReal[0] + signalFreqImag[0] * signalFreqImag[0]).toFloat() << " " << (signalFreqReal[1] * signalFreqReal[1] + signalFreqImag[1] * signalFreqImag[1]).toFloat() << " " << (signalFreqReal[2] * signalFreqReal[2] + signalFreqImag[2] * signalFreqImag[2]).toFloat() << " " << (signalFreqReal[3] * signalFreqReal[3] + signalFreqImag[3] * signalFreqImag[3]).toFloat() << std::endl;
+        // std::cout << "C: " << signalFreqReal[0].toFloat() << " " << signalFreqReal[1].toFloat() << " " << signalFreqReal[2].toFloat() << " " << signalFreqReal[3].toFloat() << std::endl;
+        // std::cout << "B: " << signalWindow[0].toFloat() << " " << signalWindow[1].toFloat() << " " << signalWindow[2].toFloat() << " " << signalWindow[3].toFloat() << std::endl;
+        // std::cout << "C: " << signalFreqImag[0].toFloat() << " " << signalFreqImag[1].toFloat() << " " << signalFreqImag[2].toFloat() << " " << signalFreqImag[3].toFloat() << std::endl;
+        // std::cout << "I: " << inImag[0].toFloat() << " " << inImag[1].toFloat() << " " << inImag[2].toFloat() << " " << inImag[3].toFloat() << std::endl;
+
+
+        std::cout << "D: " << ampl(signalFreqReal[0], signalFreqImag[0]) << " " << ampl(signalFreqReal[1], signalFreqImag[1]) << " " << ampl(signalFreqReal[2], signalFreqImag[2]) << " " << ampl(signalFreqReal[3], signalFreqImag[3]) << std::endl;
+        std::cout << "D: " << ampl(outReal[0], outImag[0]) << " " << ampl(outReal[1], outImag[1]) << " " << ampl(outReal[2], outImag[2]) << " " << ampl(outReal[3], outImag[3]) << std::endl;
+
+        // signalFreqReal = signalWindow;
+        // signalFreqImag = inImag;
+
+        // 0.42%
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
             ec::Float freqVal = signalFreqReal[i] * signalFreqReal[i] + signalFreqImag[i] * signalFreqImag[i];
@@ -81,7 +110,51 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-// TODO pipeline and vectorize this
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, std::vector<ec::Float>& outputReal, std::vector<ec::Float>& outputImag, size_t count)
+{
+    if (count == 1)
+    {
+        outputReal[0] = inputReal[0];
+        outputImag[0] = inputImag[0];
+        return;
+    }
+
+    const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float((float)count));
+
+    std::vector<ec::Float> even(count / 2);
+    std::vector<ec::Float> odd(count / 2);
+    std::vector<ec::Float> evenI(count / 2);
+    std::vector<ec::Float> oddI(count / 2);
+
+    for (size_t i = 0; i < count / 2; i++)
+    {
+        even[i] = inputReal[i * 2];
+        evenI[i] = inputImag[i * 2];
+        odd[i] = inputReal[i * 2 + 1];
+        oddI[i] = inputImag[i * 2 + 1];
+    }
+
+    std::vector<ec::Float> evenReal(count / 2);
+    std::vector<ec::Float> evenImag(count / 2);
+    std::vector<ec::Float> oddReal(count / 2);
+    std::vector<ec::Float> oddImag(count / 2);
+
+    fft(even, evenI, evenReal, evenImag, count / 2);
+    fft(odd, oddI, oddReal, oddImag, count / 2);
+
+    for (size_t k = 0; k < count / 2; k++)
+    {
+        ec::Float co = ec_cos(angleConst * k);
+        ec::Float si = ec_sin(angleConst * k);
+
+        outputReal[k] = evenReal[k] + co * oddReal[k] - si * oddImag[k];
+        outputImag[k] = evenImag[k] + co * oddImag[k] + si * oddReal[k];
+
+        outputReal[count / 2 + k] = evenReal[k] - co * oddReal[k] - si * oddImag[k];
+        outputReal[count / 2 + k] = evenReal[k] - co * oddImag[k] - si * oddReal[k];
+    }
+}
+
 void init_angleTerms(std::vector<ec::Float>& cosInput, std::vector<ec::Float>& sinInput)
 {
     const ec::Float angleConst = (-2.0f * PI) * (1.0f / ec::Float(WINDOW_SIZE));
@@ -260,3 +333,4 @@ void compute_fourier_transform(const std::vector<ec::Float>& input, std::vector<
 
     return;
 }
+

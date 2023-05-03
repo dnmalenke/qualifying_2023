@@ -135,7 +135,7 @@ namespace ec
     
     for (const auto& [key, value] : s_measPoints)
     {
-      ostrm << "  \"" << value.m_name << "\" : " << value.m_count << ",\n";
+      ostrm << "  \"" << value.m_name << "\" : " << value.m_count << " * " << value.m_runtimeWeight << " = " << value.m_count*value.m_runtimeWeight << ",\n";
     }
     ostrm << "}\n";
   }
