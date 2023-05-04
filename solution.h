@@ -72,7 +72,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
             {
                 continue;
             }
-
+            
             memcpy(preLogSpectrum.data() + i, &freqVal, sizeof(ec::Float));
 
             freqVal = ec_log(freqVal);
@@ -223,6 +223,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 {
                     v1Cache[k] = angleTerms[WINDOW_SIZE - count + k] * odd[k];
                     v2Cache[k] = angleTerms[2 * WINDOW_SIZE - count + k] * oddI[k];
+
                     c1 = (v1Cache[k] - v2Cache[k]);
 
                     c2Cache[k] = (angleTerms[WINDOW_SIZE - count + k] * oddI[k] + angleTerms[2 * WINDOW_SIZE - count + k] * odd[k]);
