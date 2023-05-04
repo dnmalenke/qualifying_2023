@@ -66,12 +66,13 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         {
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
 
-            if (freqVal <= preLogSpectrum[i])
+            // we will always take the first window
+            if (j != 0 && freqVal <= preLogSpectrum[i])
             {
                 continue;
             }
 
-            preLogSpectrum[i] = freqVal;
+            memcpy(preLogSpectrum.data() + i, &freqVal, sizeof(ec::Float));
 
             freqVal = ec_log(freqVal);
             freqVal *= spC0;
@@ -85,7 +86,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
                 freqVal += spC1;
             }
 
-            outputSpectrum[i] = ec_max(outputSpectrum[i], freqVal);
+            memcpy(outputSpectrum.data() + i, &freqVal, sizeof(ec::Float));
         }
 
         idxStartWin += stepBetweenWins;
@@ -134,7 +135,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
 
     // negative returns if we run it with too small of data because of copy overhead
-    if (halfCount >= 64)
+    if (halfCount >= 128)
     {
         std::vector<ec::Float> big(count);
         memcpy(big.data(), odd.data(), sizeof(ec::Float) * halfCount);
@@ -190,16 +191,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     {
         std::vector<ec::Float> v1Cache(halfCount / 2);
         std::vector<ec::Float> v2Cache(halfCount / 2);
-        std::vector<ec::Float> v3Cache(halfCount / 2);
-        std::vector<ec::Float> v4Cache(halfCount / 2);
+        std::vector<ec::Float> c2Cache(halfCount / 2);
 
         for (size_t k = 1; k < halfCount; k++)
         {
-            // ec::Float v3 = angleTerms[WINDOW_SIZE - count + k] * oddI[k];
-            // ec::Float v4 = angleTerms[2 * WINDOW_SIZE - count + k] * odd[k];
-
-            // std::cout << "k: " << k << " v3: " << v3.toFloat() << " v4: " << v4.toFloat() << std::endl;
-
             ec::Float c1;
             ec::Float c2;
 
@@ -218,7 +213,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 if (k > halfCount / 2)
                 {
                     c1 = (v2Cache[halfCount - k] - v1Cache[halfCount - k]);
-                    c2 = (v3Cache[halfCount - k] + v4Cache[halfCount - k]);
+
+                    inputImag[k] = evenI[k] + c2Cache[halfCount - k];
+                    inputImag[halfCount + k] = evenI[k] - c2Cache[halfCount - k];
                 }
                 else
                 {
@@ -226,16 +223,14 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                     v2Cache[k] = angleTerms[2 * WINDOW_SIZE - count + k] * oddI[k];
                     c1 = (v1Cache[k] - v2Cache[k]);
 
-                    v3Cache[k] = angleTerms[WINDOW_SIZE - count + k] * oddI[k];
-                    v4Cache[k] = angleTerms[2 * WINDOW_SIZE - count + k] * odd[k];
-                    c2 = (v3Cache[k] + v4Cache[k]);
+                    c2Cache[k] = (angleTerms[WINDOW_SIZE - count + k] * oddI[k] + angleTerms[2 * WINDOW_SIZE - count + k] * odd[k]);
+
+                    inputImag[k] = evenI[k] + c2Cache[k];
+                    inputImag[halfCount + k] = evenI[k] - c2Cache[k];
                 }
 
                 inputReal[k] = even[k] + c1;
-                inputImag[k] = evenI[k] + c2;
-
                 inputReal[halfCount + k] = even[k] - c1;
-                inputImag[halfCount + k] = evenI[k] - c2;
             }
         }
     }
