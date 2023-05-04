@@ -17,6 +17,10 @@ static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
 static const ec::Float minusTwo = -2.0f;
 
+static const ec::Float spC0((float)(10.0f / log(10.0f)));
+static const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
+static const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
+
 void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms();
 
@@ -42,9 +46,6 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     init_blackmanCoefs(blackmanCoefs);
     init_angleTerms();
 
-    const ec::Float spC0((float)(10.0f / log(10.0f)));
-    const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
-    const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
     vecHw.resetMemTo0();
@@ -98,6 +99,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     size_t halfCount = count / 2;
+    size_t quarterCount = halfCount / 2;
 
     std::vector<ec::Float> even(halfCount);
     std::vector<ec::Float> evenI(halfCount);
@@ -189,16 +191,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
     else
     {
-        std::vector<ec::Float> v1Cache(halfCount / 2);
-        std::vector<ec::Float> v2Cache(halfCount / 2);
-        std::vector<ec::Float> c2Cache(halfCount / 2);
+        std::vector<ec::Float> v1Cache(quarterCount);
+        std::vector<ec::Float> v2Cache(quarterCount);
+        std::vector<ec::Float> c2Cache(quarterCount);
 
         for (size_t k = 1; k < halfCount; k++)
         {
             ec::Float c1;
             ec::Float c2;
 
-            if (k == halfCount / 2)
+            if (k == quarterCount)
             {
                 memcpy(&inputReal[k], &even[k], sizeof(ec::Float));
                 memcpy(&inputReal[halfCount + k], &even[k], sizeof(ec::Float));
@@ -210,7 +212,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             }
             else
             {
-                if (k > halfCount / 2)
+                if (k > quarterCount)
                 {
                     c1 = (v2Cache[halfCount - k] - v1Cache[halfCount - k]);
 
@@ -289,28 +291,27 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     assert(input.size() == WINDOW_SIZE);
     // but we should double check that
 
-    const ec::Float c1(float(2.0f * M_PI) / (WINDOW_SIZE - 1));
-    const ec::Float c2(float(4.0f * M_PI) / (WINDOW_SIZE - 1));
+    const size_t halfSize = WINDOW_SIZE / 2;
+
 
     // micro optimization, we can skip 0 because vecHw memory is reset to 0
-    for (size_t i = 1; i < WINDOW_SIZE; ++i)
+    for (size_t i = 1; i < halfSize; ++i)
     {
         input[i] = i;
     }
 
-    vecHw.copyToHw(input, 1, WINDOW_SIZE - 1, 1);
+    vecHw.copyToHw(input, 1, halfSize - 1, 1);
 
     // TODO see if we can pipeline this to be faster
     // multiplaction by constants
-    for (size_t i = 0; i < WINDOW_SIZE / 32; ++i)
+    for (size_t i = 0; i < WINDOW_SIZE / 64; ++i)
     {
-        vecHw.mul32(32 * i, c2, WINDOW_SIZE + 32 * i);
-        vecHw.mul32(32 * i, c1, 32 * i);
+        vecHw.mul32(32 * i, ec::Float(float(4.0f * M_PI) / (WINDOW_SIZE - 1)), WINDOW_SIZE + 32 * i);
+        vecHw.mul32(32 * i, ec::Float(float(2.0f * M_PI) / (WINDOW_SIZE - 1)), 32 * i);
     }
 
     // in-place cosine operations
-    //TODO: COS WILL REPEAT EVENTUALLY
-    for (size_t i = 0; i < WINDOW_SIZE / 4; ++i)
+    for (size_t i = 0; i < WINDOW_SIZE / 8; ++i)
     {
         vecHw.cos4(4 * i, 4 * i);
         vecHw.cos4(WINDOW_SIZE + 4 * i, WINDOW_SIZE + 4 * i);
@@ -323,27 +324,30 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     */
     std::vector<ec::Float> cosOut(2 * WINDOW_SIZE);
 
-    vecHw.copyFromHw(cosOut, 0, 2 * WINDOW_SIZE, 0);
+    vecHw.copyFromHw(cosOut, 0, halfSize, 0);
+    vecHw.copyFromHw(cosOut, WINDOW_SIZE, halfSize, WINDOW_SIZE);
+
+    for (size_t i = 0; i < halfSize; i++)
+    {
+        memcpy(cosOut.data() + halfSize + i, cosOut.data() + halfSize - i - 1, sizeof(ec::Float));
+        memcpy(cosOut.data() + WINDOW_SIZE + halfSize + i, cosOut.data() + WINDOW_SIZE + halfSize - i - 1, sizeof(ec::Float));
+    }
 
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
     streamHw.resetStreamHw();
 
     streamHw.copyToHw(cosOut, 0, 2 * WINDOW_SIZE, 0);
 
-    streamHw.createFifos(9);
-
-    ec::Float s1(-0.5f);
-    ec::Float s2(0.42f);
-    ec::Float s3(0.08f);
+    streamHw.createFifos(6);
 
     // -0.5 * first cosine
-    streamHw.addOpMulToPipeline(0, s1, 1);
+    streamHw.addOpMulToPipeline(0, ec::Float(-0.5f), 1);
 
     // 0.42 + first cosine
-    streamHw.addOpAddToPipeline(1, s2, 2);
+    streamHw.addOpAddToPipeline(1, ec::Float(0.42f), 2);
 
     // 0.08 * second cosine
-    streamHw.addOpMulToPipeline(3, s3, 4);
+    streamHw.addOpMulToPipeline(3, ec::Float(0.08f), 4);
 
     // first cosine + second cosine
     streamHw.addOpAddToPipeline(2, 4, 5);
