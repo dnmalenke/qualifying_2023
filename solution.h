@@ -96,6 +96,10 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
+// This algorithm breaks everything up recursively into many function calls
+// if we can somehow make it iterative and have access to all of it's working arrays
+// it might be possible to combine those working arrays into larger arrays that can be
+// fed through a really fast pipeline
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     size_t halfCount = count / 2;
