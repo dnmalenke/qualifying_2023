@@ -45,15 +45,13 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     init_blackmanCoefs(blackmanCoefs);
     init_angleTerms();
-
-
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.resetMemTo0();
-
-    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE - 64, 0);
 
     for (size_t j = 0; j < numWins; j++)
     {
+        vecHw.resetMemTo0();
+        vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
+
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
@@ -72,7 +70,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
             {
                 continue;
             }
-            
+
             memcpy(preLogSpectrum.data() + i, &freqVal, sizeof(ec::Float));
 
             freqVal = ec_log(freqVal);
@@ -96,11 +94,116 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
+{
+    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+    // vecHw.resetMemTo0();
+
+    vecHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
+
+    size_t c = WINDOW_SIZE / 2;
+
+    // c = 512 only working with reals for now
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // [0 - C] = [0 - C] + [C - N]
+        vecHw.add32(32 * i, c + 32 * i, 32 * i);
+    }
+
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // (-1)*inputReal[C through N]
+        vecHw.mul32(c + 32 * i, minusOne, c + 32 * i);
+    }
+
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // [C - N] = [0 - C] + (-1)*[C - N]
+        vecHw.add32(32 * i, c + 32 * i, c + 32 * i);
+    }
+
+    /*
+    input[C - 2C] * omega[0 through C] # this is complex multiplication
+    example of complex multiplication:
+    (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
+    So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
+   */
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        vecHw.mul32(c + 32 * i, 2 * WINDOW_SIZE + 32 * i, c + 32 * i); // real [C - N] = real [C - N] * cos(C-N)
+        vecHw.mul32(c + 32 * i, 3 * WINDOW_SIZE + 32 * i, WINDOW_SIZE + c + 32 * i); // imag [C - N] = real[C - N] * sin(C-N)
+    }
+
+    // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
+
+    c = c / 2; // c = 256
+
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // [0 - C] = [0 - C] + [C - 2C]
+        vecHw.add32(32 * i, c + 32 * i, 32 * i);
+
+        // [2C - 3C] = [2C - 3C] + [3C - 4C]
+        vecHw.add32(2 * c + 32 * i, 3 * c + 32 * i, 2 * c + 32 * i);
+
+        // we now have imaginaries so we need to work with them.
+        vecHw.add32(WINDOW_SIZE + 2 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i, WINDOW_SIZE + 2 * c + 32 * i);
+    }
+
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // (-1)*[C - 2C]
+        vecHw.mul32(c + 32 * i, minusOne, c + 32 * i);
+
+        // (-1)*[3C - 4C]
+        vecHw.mul32(3 * c + 32 * i, minusOne, 3 * c + 32 * i);
+        vecHw.mul32(WINDOW_SIZE + 3 * c + 32 * i, minusOne, WINDOW_SIZE + 3 * c + 32 * i);
+    }
+
+
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+        vecHw.add32(32 * i, c + 32 * i, 32 * i);
+
+        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+        vecHw.add32(2 * c + 32 * i, 3 * c + 32 * i, 3 * c + 32 * i);
+        vecHw.add32(WINDOW_SIZE + 2 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i);
+    }
+
+
+    // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
+
+    // input[C - 2C] * omega[0 through C] 
+    // input[3C - 4C] * omega[0 through C] 
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        size_t realC = c + 32 * i;
+        size_t imagC = WINDOW_SIZE + c + 32 * i;
+        size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
+        size_t buf1 = 3 * WINDOW_SIZE + 32 * i;
+
+        vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + 2 * c, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+        vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + 2 * c, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
+        vecHw.mul32(buf1, minusOne, buf1); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
+
+        vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + 2 * c, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+        // vecHw.mul32(c + 32 * i, 3 * WINDOW_SIZE + 32 * i + 2 * c, WINDOW_SIZE + c + 32 * i); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+
+        vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+
+
+    }
+
+
+}
+
+
 // This algorithm breaks everything up recursively into many function calls
 // if we can somehow make it iterative and have access to all of it's working arrays
 // it might be possible to combine those working arrays into larger arrays that can be
 // fed through a really fast pipeline
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
+void fft2(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     size_t halfCount = count / 2;
     size_t quarterCount = halfCount / 2;
@@ -268,11 +371,11 @@ void init_angleTerms()
         {
             if (i != 0)
             {
-                if (!(idx >= 977 && idx <= 991 || idx >= 1001 && idx <= 1007 || idx >= 1013 && idx <= 1015 || idx == 1019))
-                {
-                    angleTerms[idx] = ec_cos(aC * i);
-                    angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
-                }
+                // if (!(idx >= 977 && idx <= 991 || idx >= 1001 && idx <= 1007 || idx >= 1013 && idx <= 1015 || idx == 1019))
+                // {
+                angleTerms[idx] = ec_cos(aC * i);
+                angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
+                // }
             }
 
             idx++;
