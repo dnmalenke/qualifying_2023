@@ -19,7 +19,7 @@ static const ec::Float minusTwo = -2.0f;
 void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms();
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
+void fft(std::vector<ec::Float>& inputs, size_t count);
 
 static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
 
@@ -30,9 +30,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const size_t stepBetweenWins = static_cast<size_t>(ceil(WINDOW_SIZE * (1 - OVERLAP_RATIO)));
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
-    std::vector<ec::Float> signalWindow(WINDOW_SIZE);
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
-
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
@@ -44,25 +42,62 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
     const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.resetMemTo0();
+    // ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+    // vecHw.resetMemTo0();
 
-    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 0);
+    // vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 0);
+
+    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    streamHw.resetStreamHw();
+
+    streamHw.createFifos(41);
+
+    streamHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 0);
+
+    streamHw.addOpMulToPipeline(0, 1, 2); // co * odd 
+    streamHw.addOpMulToPipeline(3, 4, 5); // si * odd
+    streamHw.addOpMulToPipeline(6, 7, 8); // si * oddI
+    streamHw.addOpMulToPipeline(8, minusOne, 9); // -1 * (si * oddI)
+
+    streamHw.addOpMulToPipeline(10, 11, 12); // co * oddI
+
+    streamHw.addOpAddToPipeline(9, 2, 13); // -1 * (si * oddI) + (co * odd) -> c1
+    streamHw.addOpAddToPipeline(12, 5, 14); // (co * oddI) + (si * odd) -> c2
+
+    streamHw.addOpAddToPipeline(15, 13, 16); // even + c1
+    streamHw.addOpAddToPipeline(18, 14, 19); // even[halfCount] + c2
+
+    // generate another set of c1 and c2 but NEGATIVE this time!!
+    streamHw.addOpMulToPipeline(20, 21, 22); // co * odd 
+    streamHw.addOpMulToPipeline(23, 24, 25); // si * odd
+    streamHw.addOpMulToPipeline(26, 27, 28); // si * oddI
+    streamHw.addOpMulToPipeline(28, minusOne, 29); // -1 * (si * oddI)
+
+    streamHw.addOpMulToPipeline(30, 31, 32); // co * oddI
+
+    streamHw.addOpAddToPipeline(29, 22, 33); // -1 * (si * oddI) + (co * odd) -> c1
+    streamHw.addOpAddToPipeline(32, 25, 34); // (co * oddI) + (si * odd) -> c2
+    streamHw.addOpMulToPipeline(33, minusOne, 35); // -1 * c1
+    streamHw.addOpMulToPipeline(34, minusOne, 36); // -1 * c2
+
+    streamHw.addOpAddToPipeline(37, 35, 38); // even - c1
+    streamHw.addOpAddToPipeline(39, 36, 40); // even[halfCount] -c2
 
     for (size_t j = 0; j < numWins; j++)
     {
+        std::vector<ec::Float> signalWindow(2 * WINDOW_SIZE);
+
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
+            signalWindow[i + WINDOW_SIZE] = ec::Float(0.0f);
         }
 
-        std::vector<ec::Float> inImag(WINDOW_SIZE);
-
-        fft(signalWindow, inImag, WINDOW_SIZE);
+        fft(signalWindow, WINDOW_SIZE);
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
+            ec::Float freqVal = signalWindow[i] * signalWindow[i] + signalWindow[WINDOW_SIZE + i] * signalWindow[WINDOW_SIZE + i];
             freqVal = ec_log(freqVal);
             freqVal *= spC0;
 
@@ -84,101 +119,197 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
+void fft(std::vector<ec::Float>& inputs, size_t count)
 {
     size_t halfCount = count / 2;
 
-    std::vector<ec::Float> even(halfCount);
-    std::vector<ec::Float> odd(halfCount);
-    std::vector<ec::Float> evenI(halfCount);
-    std::vector<ec::Float> oddI(halfCount);
+    std::vector<ec::Float> even(count);
+    std::vector<ec::Float> odd(count);
 
     if (count > 4)
     {
         for (size_t i = 0; i < halfCount; i++)
         {
-            even[i] = inputReal[i * 2];
-            evenI[i] = inputImag[i * 2];
+            even[i] = inputs[i * 2];
+            even[halfCount + i] = inputs[count + i * 2];
 
-            odd[i] = inputReal[i * 2 + 1];
-            oddI[i] = inputImag[i * 2 + 1];
+            odd[i] = inputs[i * 2 + 1];
+            odd[halfCount + i] = inputs[count + i * 2 + 1];
         }
 
-        fft(even, evenI, halfCount);
-        fft(odd, oddI, halfCount);
+        fft(even, halfCount);
+        fft(odd, halfCount);
     }
     else
     {
-        even[0] = inputReal[0] + inputReal[2];
-        evenI[0] = inputImag[0] + inputImag[2];
+        even[0] = inputs[0] + inputs[2];
+        even[halfCount] = inputs[count + 0] + inputs[count + 2];
 
-        even[1] = inputReal[0] - inputReal[2];
-        evenI[1] = inputImag[0] - inputImag[2];
+        even[1] = inputs[0] - inputs[2];
+        even[halfCount + 1] = inputs[count + 0] - inputs[count + 2];
 
-        odd[0] = inputReal[1] + inputReal[3];
-        oddI[0] = inputImag[1] + inputImag[3];
+        odd[0] = inputs[1] + inputs[3];
+        odd[halfCount] = inputs[count + 1] + inputs[count + 3];
 
-        odd[1] = inputReal[1] - inputReal[3];
-        oddI[1] = inputImag[1] - inputImag[3];
+        odd[1] = inputs[1] - inputs[3];
+        odd[halfCount + 1] = inputs[count + 1] - inputs[count + 3];
+
+        //TODO try return here
     }
 
-    inputReal[0] = even[0] + odd[0];
-    inputImag[0] = evenI[0] + oddI[0];
-
-    inputReal[halfCount] = even[0] - odd[0];
-    inputImag[halfCount] = evenI[0] - oddI[0];
-
     // negative returns if we run it with too small of data because of copy overhead
-    if (halfCount >= 64)
+    if (count == 1024)
     {
-        ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+        std::vector<ec::Float> test2(2 * WINDOW_SIZE);
+        ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+        streamHw.resetStreamHw();
 
-        vecHw.copyToHw(odd, 0, halfCount, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(oddI, 0, halfCount, 2 * WINDOW_SIZE + 512);
+        streamHw.createFifos(41);
 
-        std::vector<ec::Float> test(WINDOW_SIZE);
-        std::vector<ec::Float> testI(WINDOW_SIZE);
+        streamHw.copyToHw(angleTerms, 0, 512, 0);
+        streamHw.copyToHw(angleTerms, 1024, 512, 1024);
+        streamHw.copyToHw(odd, 0, count, 2 * WINDOW_SIZE);
+        streamHw.copyToHw(even, 0, count, 3 * WINDOW_SIZE);
 
-        for (size_t i = 0; i < halfCount / 32; i++)
-        {
-            vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i); // co * odd
-            vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, (2 * WINDOW_SIZE + 512) + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i); // si * oddI
-            vecHw.mul32((3 * WINDOW_SIZE + 512) + 32 * i, minusOne, (3 * WINDOW_SIZE + 512) + 32 * i); // -1 * (si * oddI)
+        streamHw.addOpMulToPipeline(0, 1, 2); // co * odd 
+        streamHw.addOpMulToPipeline(3, 4, 5); // si * odd
+        streamHw.addOpMulToPipeline(6, 7, 8); // si * oddI
+        streamHw.addOpMulToPipeline(8, minusOne, 9); // -1 * (si * oddI)
 
-            vecHw.add32(3 * WINDOW_SIZE + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i, 3 * WINDOW_SIZE + 32 * i); // c1 is at 3 * WINDOW_SIZE
-        }
+        streamHw.addOpMulToPipeline(10, 11, 12); // co * oddI
 
-        for (size_t i = 0; i < halfCount / 32; i++)
-        {
-            vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // co * oddI... we are done with oddI so we can overwrite
-            vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // si * odd... we are done with odd so we can overwrite
+        streamHw.addOpAddToPipeline(9, 2, 13); // -1 * (si * oddI) + (co * odd) -> c1
+        streamHw.addOpAddToPipeline(12, 5, 14); // (co * oddI) + (si * odd) -> c2
 
-            vecHw.add32(2 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i); // c2 is at 3 * WINDOW_SIZE + 512
-        }
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 0, halfCount); // cos to pipe 0
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 10, halfCount); // cos to pipe 10
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 3, halfCount); // sin to pipe 3
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 6, halfCount); // sin to pipe 6
 
-        vecHw.copyToHw(even, 0, halfCount, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(evenI, 0, halfCount, 2 * WINDOW_SIZE + 512);
+        // odd to pipe 1 and 4
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 1, halfCount);
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 4, halfCount);
 
-        for (size_t i = 0; i < halfCount / 32; i++)
-        {
-            vecHw.add32(2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // even + c1
-            vecHw.add32(2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2
-        }
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 7, halfCount); // oddI to pipe 7
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 11, halfCount); // oddI to pipe 11
 
-        vecHw.copyFromHw(inputReal, 2 * WINDOW_SIZE + 1, halfCount - 1, 1);
-        vecHw.copyFromHw(inputImag, 2 * WINDOW_SIZE + 512 + 1, halfCount - 1, 1);
+        streamHw.startStreamDataFifoToMem(13, 2 * WINDOW_SIZE, halfCount);
+        streamHw.startStreamDataFifoToMem(14, 2 * WINDOW_SIZE + halfCount, halfCount);
 
-        for (size_t i = 0; i < halfCount / 32; i++)
-        {
-            vecHw.mul32(3 * WINDOW_SIZE + 32 * i, minusTwo, 3 * WINDOW_SIZE + 32 * i); // -2 * c1
-            vecHw.mul32(3 * WINDOW_SIZE + 512 + 32 * i, minusTwo, 3 * WINDOW_SIZE + 512 + 32 * i); // -2 * c2
+        streamHw.runPipeline();
 
-            vecHw.add32(2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // even + c1 - 2*c1
-            vecHw.add32(2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2 - 2*c2
-        }
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 13, halfCount); // c1 -> 13
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 14, halfCount); // c2 14
 
-        vecHw.copyFromHw(inputReal, 2 * WINDOW_SIZE + 1, halfCount - 1, halfCount + 1);
-        vecHw.copyFromHw(inputImag, 2 * WINDOW_SIZE + 512 + 1, halfCount - 1, halfCount + 1);
+        streamHw.addOpAddToPipeline(15, 13, 16); // even + c1
+        streamHw.addOpAddToPipeline(18, 14, 19); // even[halfCount] + c2
+
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 15, halfCount); // even -> 15
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + halfCount, 18, halfCount); // even[halfCount] 18
+
+        streamHw.startStreamDataFifoToMem(16, 0, halfCount); // inputs[k] = even[k] + c1;
+        streamHw.startStreamDataFifoToMem(19, count, halfCount); // inputs[count + k] = even[halfCount + k] + c2;
+
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 33, halfCount); // c1 -> 33
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 34, halfCount); // c2 34
+
+        streamHw.addOpMulToPipeline(33, minusOne, 35); // -1 * c1
+        streamHw.addOpMulToPipeline(34, minusOne, 36); // -1 * c2
+
+        streamHw.addOpAddToPipeline(37, 35, 38); // even - c1
+        streamHw.addOpAddToPipeline(39, 36, 40); // even[halfCount] -c2
+
+        streamHw.startStreamDataFifoToMem(38, halfCount, halfCount); // inputs[halfCount + k] = even[k] - c1;
+        streamHw.startStreamDataFifoToMem(40, count + halfCount, halfCount); // inputs[count + halfCount + k] = even[halfCount + k] - c2;
+
+        streamHw.runPipeline();
+
+        streamHw.copyFromHw(inputs, 0, 2 * count, 0);
+
+        streamHw.resetStreamHw();
+
+        streamHw.createFifos(41);
+
+        streamHw.copyToHw(angleTerms, 512, 2 * WINDOW_SIZE - 512, 512);
+
+        streamHw.addOpMulToPipeline(0, 1, 2); // co * odd 
+        streamHw.addOpMulToPipeline(3, 4, 5); // si * odd
+        streamHw.addOpMulToPipeline(6, 7, 8); // si * oddI
+        streamHw.addOpMulToPipeline(8, minusOne, 9); // -1 * (si * oddI)
+
+        streamHw.addOpMulToPipeline(10, 11, 12); // co * oddI
+
+        streamHw.addOpAddToPipeline(9, 2, 13); // -1 * (si * oddI) + (co * odd) -> c1
+        streamHw.addOpAddToPipeline(12, 5, 14); // (co * oddI) + (si * odd) -> c2
+
+        streamHw.addOpAddToPipeline(15, 13, 16); // even + c1
+        streamHw.addOpAddToPipeline(18, 14, 19); // even[halfCount] + c2
+
+        // generate another set of c1 and c2 but NEGATIVE this time!!
+        streamHw.addOpMulToPipeline(20, 21, 22); // co * odd 
+        streamHw.addOpMulToPipeline(23, 24, 25); // si * odd
+        streamHw.addOpMulToPipeline(26, 27, 28); // si * oddI
+        streamHw.addOpMulToPipeline(28, minusOne, 29); // -1 * (si * oddI)
+
+        streamHw.addOpMulToPipeline(30, 31, 32); // co * oddI
+
+        streamHw.addOpAddToPipeline(29, 22, 33); // -1 * (si * oddI) + (co * odd) -> c1
+        streamHw.addOpAddToPipeline(32, 25, 34); // (co * oddI) + (si * odd) -> c2
+        streamHw.addOpMulToPipeline(33, minusOne, 35); // -1 * c1
+        streamHw.addOpMulToPipeline(34, minusOne, 36); // -1 * c2
+
+        streamHw.addOpAddToPipeline(37, 35, 38); // even - c1
+        streamHw.addOpAddToPipeline(39, 36, 40); // even[halfCount] -c2
+    }
+    else if (halfCount >= 64)
+    {
+        // std::vector<ec::Float> test(2 * WINDOW_SIZE);
+        // std::vector<ec::Float> test2(2 * WINDOW_SIZE);
+
+        ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+
+        streamHw.copyToHw(odd, 0, count, 2 * WINDOW_SIZE);
+        streamHw.copyToHw(even, 0, count, 3 * WINDOW_SIZE);
+
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 0, halfCount); // cos to pipe 0
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 10, halfCount); // cos to pipe 10
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 3, halfCount); // sin to pipe 3
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 6, halfCount); // sin to pipe 6
+
+        // odd to pipe 1 and 4
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 1, halfCount);
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 4, halfCount);
+
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 7, halfCount); // oddI to pipe 7
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 11, halfCount); // oddI to pipe 11
+
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 15, halfCount); // even -> 15
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + halfCount, 18, halfCount); // even[halfCount] 18
+
+        streamHw.startStreamDataFifoToMem(16, 2 * WINDOW_SIZE, halfCount); // inputs[k] = even[k] + c1;
+        streamHw.startStreamDataFifoToMem(19, 2 * WINDOW_SIZE + count, halfCount); // inputs[count + k] = even[halfCount + k] + c2;
+
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 20, halfCount); // cos to pipe 20
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE - count, 30, halfCount); // cos to pipe 30
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 23, halfCount); // sin to pipe 23
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE - count, 26, halfCount); // sin to pipe 26
+
+        // odd to pipe 1 and 4
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 21, halfCount);
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE, 24, halfCount);
+
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 27, halfCount); // oddI to pipe 27
+        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + halfCount, 31, halfCount); // oddI to pipe 31
+
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE, 37, halfCount); // even -> 37
+        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + halfCount, 39, halfCount); // even[halfCount] 39
+
+        streamHw.startStreamDataFifoToMem(38, 2 * WINDOW_SIZE + halfCount, halfCount); // inputs[halfCount + k] = even[k] - c1;
+        streamHw.startStreamDataFifoToMem(40, 2 * WINDOW_SIZE + count + halfCount, halfCount); // inputs[count + halfCount + k] = even[halfCount + k] - c2;
+
+        streamHw.runPipeline();
+
+        streamHw.copyFromHw(inputs, 2 * WINDOW_SIZE, 2 * count, 0);
     }
     else
     {
@@ -187,16 +318,22 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             ec::Float co = angleTerms[WINDOW_SIZE - count + k];
             ec::Float si = angleTerms[2 * WINDOW_SIZE - count + k];
 
-            ec::Float c1 = (co * odd[k] - si * oddI[k]);
-            ec::Float c2 = (co * oddI[k] + si * odd[k]);
+            ec::Float c1 = (co * odd[k] - si * odd[halfCount + k]);
+            ec::Float c2 = (co * odd[halfCount + k] + si * odd[k]);
 
-            inputReal[k] = even[k] + c1;
-            inputImag[k] = evenI[k] + c2;
+            inputs[k] = even[k] + c1;
+            inputs[count + k] = even[halfCount + k] + c2;
 
-            inputReal[halfCount + k] = even[k] - c1;
-            inputImag[halfCount + k] = evenI[k] - c2;
+            inputs[halfCount + k] = even[k] - c1;
+            inputs[count + halfCount + k] = even[halfCount + k] - c2;
         }
     }
+
+    inputs[0] = even[0] + odd[0];
+    inputs[count + 0] = even[halfCount] + odd[halfCount];
+
+    inputs[halfCount] = even[0] - odd[0];
+    inputs[count + halfCount] = even[halfCount] - odd[halfCount];
 }
 
 void init_angleTerms()
@@ -216,6 +353,11 @@ void init_angleTerms()
                 angleTerms[idx] = ec_cos(aC * i);
                 angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
             }
+            // else
+            // {
+            //     angleTerms[idx] = ec::Float(1.0f);
+            //     angleTerms[idx + WINDOW_SIZE] = ec::Float(0.0f);
+            // }
 
             idx++;
         }

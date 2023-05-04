@@ -8,7 +8,7 @@
 #include <vector>
 #include <queue>
 
-static constexpr size_t STREAM_HW_MEM_SIZE = 4 * 1024; // [4B-values]
+static constexpr size_t STREAM_HW_MEM_SIZE = 8 * 1024; // [4B-values]
 static constexpr size_t FIFO_MAX_SIZE = 32; // [4B-values]
 static constexpr size_t MAX_NUM_MEM_TO_FIFO_CONNECTIONS = 32;
 static constexpr size_t MAX_NUM_OPERATIONS = 1024;
@@ -25,7 +25,7 @@ namespace ec
     static inline StreamHw* pSingletonStreamHw = nullptr;
 
     inline StreamHw()
-      : m_mem(VEC_HW_MEM_SIZE, 0.0f)
+      : m_mem(STREAM_HW_MEM_SIZE, 0.0f)
     {
     }
 
