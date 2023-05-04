@@ -147,6 +147,8 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
         vecHw.copyToHw(big, 0, count, 2 * WINDOW_SIZE);
 
+        // we need to use the symmetry of v1, v2 and c2 to reduce operations.
+        // this is about 25% of the computation power
         for (size_t i = 0; i < halfCount / 32; i++)
         {
             vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i); // co * odd
@@ -191,6 +193,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
     else
     {
+        // this is about 50% of the computation time
+        // a lot of it is going towards assignments and multiplication and idk how to make it faster cause we're doing a bunch of little operations.
+
         std::vector<ec::Float> v1Cache(quarterCount);
         std::vector<ec::Float> v2Cache(quarterCount);
         std::vector<ec::Float> c2Cache(quarterCount);
