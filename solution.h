@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <vector>
 #include <cassert>
+#include <cstring>
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
@@ -34,6 +35,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
+    std::vector<ec::Float> preLogSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
 
@@ -47,7 +49,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
     vecHw.resetMemTo0();
 
-    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 0);
+    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE - 64, 0);
 
     for (size_t j = 0; j < numWins; j++)
     {
@@ -63,6 +65,14 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
+
+            if (freqVal <= preLogSpectrum[i])
+            {
+                continue;
+            }
+
+            preLogSpectrum[i] = freqVal;
+
             freqVal = ec_log(freqVal);
             freqVal *= spC0;
 
@@ -131,10 +141,13 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     // negative returns if we run it with too small of data because of copy overhead
     if (halfCount >= 64)
     {
+        std::vector<ec::Float> big(count);
+        memcpy(big.data(), odd.data(), sizeof(ec::Float) * halfCount);
+        memcpy(big.data() + halfCount, oddI.data(), sizeof(ec::Float) * halfCount);
+
         ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
 
-        vecHw.copyToHw(odd, 0, halfCount, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(oddI, 0, halfCount, 2 * WINDOW_SIZE + 512);
+        vecHw.copyToHw(big, 0, count, 2 * WINDOW_SIZE);
 
         std::vector<ec::Float> test(WINDOW_SIZE);
         std::vector<ec::Float> testI(WINDOW_SIZE);
@@ -142,7 +155,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         for (size_t i = 0; i < halfCount / 32; i++)
         {
             vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i); // co * odd
-            vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, (2 * WINDOW_SIZE + 512) + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i); // si * oddI
+            vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, (2 * WINDOW_SIZE + halfCount) + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i); // si * oddI
             vecHw.mul32((3 * WINDOW_SIZE + 512) + 32 * i, minusOne, (3 * WINDOW_SIZE + 512) + 32 * i); // -1 * (si * oddI)
 
             vecHw.add32(3 * WINDOW_SIZE + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i, 3 * WINDOW_SIZE + 32 * i); // c1 is at 3 * WINDOW_SIZE
@@ -150,19 +163,21 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
         for (size_t i = 0; i < halfCount / 32; i++)
         {
-            vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // co * oddI... we are done with oddI so we can overwrite
+            vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + halfCount + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // co * oddI... we are done with oddI so we can overwrite
             vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // si * odd... we are done with odd so we can overwrite
 
             vecHw.add32(2 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i); // c2 is at 3 * WINDOW_SIZE + 512
         }
 
-        vecHw.copyToHw(even, 0, halfCount, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(evenI, 0, halfCount, 2 * WINDOW_SIZE + 512);
+        memcpy(big.data(), even.data(), sizeof(ec::Float) * halfCount);
+        memcpy(big.data() + halfCount, evenI.data(), sizeof(ec::Float) * halfCount);
+
+        vecHw.copyToHw(big, 0, count, 2 * WINDOW_SIZE);
 
         for (size_t i = 0; i < halfCount / 32; i++)
         {
             vecHw.add32(2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // even + c1
-            vecHw.add32(2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2
+            vecHw.add32(2 * WINDOW_SIZE + halfCount + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2
         }
 
         vecHw.copyFromHw(inputReal, 2 * WINDOW_SIZE + 1, halfCount - 1, 1);
@@ -207,7 +222,7 @@ void init_angleTerms()
 
     while (count >= 2)
     {
-        ec::Float aC = (-2.0f * PI) * (1.0f / count);
+        ec::Float aC(float(-2.0f * M_PI) / count);
 
         for (size_t i = 0; i < count / 2; i++)
         {
@@ -243,8 +258,8 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
     assert(input.size() == WINDOW_SIZE);
     // but we should double check that
 
-    const ec::Float c1 = 2.0f * PI / (WINDOW_SIZE - 1);
-    const ec::Float c2 = 2 * c1;
+    const ec::Float c1(float(2.0f * M_PI) / (WINDOW_SIZE - 1));
+    const ec::Float c2(float(4.0f * M_PI) / (WINDOW_SIZE - 1));
 
     // micro optimization, we can skip 0 because vecHw memory is reset to 0
     for (size_t i = 1; i < WINDOW_SIZE; ++i)
