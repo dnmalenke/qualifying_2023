@@ -99,19 +99,20 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     size_t halfCount = count / 2;
 
     std::vector<ec::Float> even(halfCount);
-    std::vector<ec::Float> odd(halfCount);
     std::vector<ec::Float> evenI(halfCount);
+
+    std::vector<ec::Float> odd(halfCount);
     std::vector<ec::Float> oddI(halfCount);
 
     if (count > 4)
     {
         for (size_t i = 0; i < halfCount; i++)
         {
-            even[i] = inputReal[i * 2];
-            evenI[i] = inputImag[i * 2];
+            memcpy(even.data() + i, inputReal.data() + i * 2, sizeof(ec::Float));
+            memcpy(evenI.data() + i, inputImag.data() + i * 2, sizeof(ec::Float));
 
-            odd[i] = inputReal[i * 2 + 1];
-            oddI[i] = inputImag[i * 2 + 1];
+            memcpy(odd.data() + i, inputReal.data() + i * 2 + 1, sizeof(ec::Float));
+            memcpy(oddI.data() + i, inputImag.data() + i * 2 + 1, sizeof(ec::Float));
         }
 
         fft(even, evenI, halfCount);
@@ -132,12 +133,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         oddI[1] = inputImag[1] - inputImag[3];
     }
 
-    inputReal[0] = even[0] + odd[0];
-    inputImag[0] = evenI[0] + oddI[0];
-
-    inputReal[halfCount] = even[0] - odd[0];
-    inputImag[halfCount] = evenI[0] - oddI[0];
-
     // negative returns if we run it with too small of data because of copy overhead
     if (halfCount >= 64)
     {
@@ -149,9 +144,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
         vecHw.copyToHw(big, 0, count, 2 * WINDOW_SIZE);
 
-        std::vector<ec::Float> test(WINDOW_SIZE);
-        std::vector<ec::Float> testI(WINDOW_SIZE);
-
         for (size_t i = 0; i < halfCount / 32; i++)
         {
             vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i); // co * odd
@@ -159,10 +151,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             vecHw.mul32((3 * WINDOW_SIZE + 512) + 32 * i, minusOne, (3 * WINDOW_SIZE + 512) + 32 * i); // -1 * (si * oddI)
 
             vecHw.add32(3 * WINDOW_SIZE + 32 * i, (3 * WINDOW_SIZE + 512) + 32 * i, 3 * WINDOW_SIZE + 32 * i); // c1 is at 3 * WINDOW_SIZE
-        }
 
-        for (size_t i = 0; i < halfCount / 32; i++)
-        {
             vecHw.mul32(WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + halfCount + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // co * oddI... we are done with oddI so we can overwrite
             vecHw.mul32(2 * WINDOW_SIZE - count + 32 * i, 2 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // si * odd... we are done with odd so we can overwrite
 
@@ -177,11 +166,12 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         for (size_t i = 0; i < halfCount / 32; i++)
         {
             vecHw.add32(2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // even + c1
-            vecHw.add32(2 * WINDOW_SIZE + halfCount + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2
+            vecHw.add32(2 * WINDOW_SIZE + halfCount + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + halfCount + 32 * i); // evenI + c2
         }
 
-        vecHw.copyFromHw(inputReal, 2 * WINDOW_SIZE + 1, halfCount - 1, 1);
-        vecHw.copyFromHw(inputImag, 2 * WINDOW_SIZE + 512 + 1, halfCount - 1, 1);
+        vecHw.copyFromHw(big, 2 * WINDOW_SIZE + 1, count - 1, 0);
+        memcpy(inputReal.data() + 1, big.data(), sizeof(ec::Float) * (halfCount - 1));
+        memcpy(inputImag.data() + 1, big.data() + halfCount, sizeof(ec::Float) * (halfCount - 1));
 
         for (size_t i = 0; i < halfCount / 32; i++)
         {
@@ -189,29 +179,72 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             vecHw.mul32(3 * WINDOW_SIZE + 512 + 32 * i, minusTwo, 3 * WINDOW_SIZE + 512 + 32 * i); // -2 * c2
 
             vecHw.add32(2 * WINDOW_SIZE + 32 * i, 3 * WINDOW_SIZE + 32 * i, 2 * WINDOW_SIZE + 32 * i); // even + c1 - 2*c1
-            vecHw.add32(2 * WINDOW_SIZE + 512 + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + 512 + 32 * i); // evenI + c2 - 2*c2
+            vecHw.add32(2 * WINDOW_SIZE + halfCount + 32 * i, 3 * WINDOW_SIZE + 512 + 32 * i, 2 * WINDOW_SIZE + halfCount + 32 * i); // evenI + c2 - 2*c2
         }
 
-        vecHw.copyFromHw(inputReal, 2 * WINDOW_SIZE + 1, halfCount - 1, halfCount + 1);
-        vecHw.copyFromHw(inputImag, 2 * WINDOW_SIZE + 512 + 1, halfCount - 1, halfCount + 1);
+        vecHw.copyFromHw(big, 2 * WINDOW_SIZE + 1, count - 1, 0);
+        memcpy(inputReal.data() + halfCount + 1, big.data(), sizeof(ec::Float) * (halfCount - 1));
+        memcpy(inputImag.data() + halfCount + 1, big.data() + halfCount, sizeof(ec::Float) * (halfCount - 1));
     }
     else
     {
+        std::vector<ec::Float> v1Cache(halfCount / 2);
+        std::vector<ec::Float> v2Cache(halfCount / 2);
+        std::vector<ec::Float> v3Cache(halfCount / 2);
+        std::vector<ec::Float> v4Cache(halfCount / 2);
+
         for (size_t k = 1; k < halfCount; k++)
         {
-            ec::Float co = angleTerms[WINDOW_SIZE - count + k];
-            ec::Float si = angleTerms[2 * WINDOW_SIZE - count + k];
+            // ec::Float v3 = angleTerms[WINDOW_SIZE - count + k] * oddI[k];
+            // ec::Float v4 = angleTerms[2 * WINDOW_SIZE - count + k] * odd[k];
 
-            ec::Float c1 = (co * odd[k] - si * oddI[k]);
-            ec::Float c2 = (co * oddI[k] + si * odd[k]);
+            // std::cout << "k: " << k << " v3: " << v3.toFloat() << " v4: " << v4.toFloat() << std::endl;
 
-            inputReal[k] = even[k] + c1;
-            inputImag[k] = evenI[k] + c2;
+            ec::Float c1;
+            ec::Float c2;
 
-            inputReal[halfCount + k] = even[k] - c1;
-            inputImag[halfCount + k] = evenI[k] - c2;
+            if (k == halfCount / 2)
+            {
+                memcpy(&inputReal[k], &even[k], sizeof(ec::Float));
+                memcpy(&inputReal[halfCount + k], &even[k], sizeof(ec::Float));
+
+                c2 = angleTerms[2 * WINDOW_SIZE - count + k] * odd[k];
+
+                inputImag[k] = evenI[k] + c2;
+                inputImag[halfCount + k] = evenI[k] - c2;
+            }
+            else
+            {
+                if (k > halfCount / 2)
+                {
+                    c1 = (v2Cache[halfCount - k] - v1Cache[halfCount - k]);
+                    c2 = (v3Cache[halfCount - k] + v4Cache[halfCount - k]);
+                }
+                else
+                {
+                    v1Cache[k] = angleTerms[WINDOW_SIZE - count + k] * odd[k];
+                    v2Cache[k] = angleTerms[2 * WINDOW_SIZE - count + k] * oddI[k];
+                    c1 = (v1Cache[k] - v2Cache[k]);
+
+                    v3Cache[k] = angleTerms[WINDOW_SIZE - count + k] * oddI[k];
+                    v4Cache[k] = angleTerms[2 * WINDOW_SIZE - count + k] * odd[k];
+                    c2 = (v3Cache[k] + v4Cache[k]);
+                }
+
+                inputReal[k] = even[k] + c1;
+                inputImag[k] = evenI[k] + c2;
+
+                inputReal[halfCount + k] = even[k] - c1;
+                inputImag[halfCount + k] = evenI[k] - c2;
+            }
         }
     }
+
+    inputReal[0] = even[0] + odd[0];
+    inputImag[0] = evenI[0] + oddI[0];
+
+    inputReal[halfCount] = even[0] - odd[0];
+    inputImag[halfCount] = evenI[0] - oddI[0];
 }
 
 void init_angleTerms()
@@ -228,8 +261,11 @@ void init_angleTerms()
         {
             if (i != 0)
             {
-                angleTerms[idx] = ec_cos(aC * i);
-                angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
+                if (!(idx >= 977 && idx <= 991 || idx >= 1001 && idx <= 1007 || idx >= 1013 && idx <= 1015 || idx == 1019))
+                {
+                    angleTerms[idx] = ec_cos(aC * i);
+                    angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
+                }
             }
 
             idx++;
@@ -299,7 +335,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input)
 
     streamHw.copyToHw(cosOut, 0, 2 * WINDOW_SIZE, 0);
 
-    streamHw.createFifos(6);
+    streamHw.createFifos(9);
 
     ec::Float s1(-0.5f);
     ec::Float s2(0.42f);
