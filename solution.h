@@ -11,22 +11,28 @@
 #include <cassert>
 #include <cstring>
 
+#define REAL(x) x + 32 * i
+#define IMAG(x) WINDOW_SIZE + x + 32 * i
+
+#define SWEET_SPOT 8
+
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
-static const ec::Float minusTwo = -2.0f;
 
 static const ec::Float spC0((float)(10.0f / log(10.0f)));
 static const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
 static const ec::Float spC2((float)(10.0f * log(125.0f / 32768.0f) / log(10.0f)));
 
-void init_blackmanCoefs(std::vector<ec::Float>& input);
+void init_blackmanCoefs();
 void init_angleTerms();
+uint16_t reverse_bits(uint16_t x);
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
 
 static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
+static std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
@@ -36,25 +42,22 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
     std::vector<ec::Float> signalWindow(WINDOW_SIZE);
-    std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
     std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
     std::vector<ec::Float> preLogSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
 
-    init_blackmanCoefs(blackmanCoefs);
+    init_blackmanCoefs();
     init_angleTerms();
 
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
+    vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE - SWEET_SPOT, 2 * WINDOW_SIZE);
+
 
     for (size_t j = 0; j < numWins; j++)
     {
-        for (size_t i = 0; i < WINDOW_SIZE; i++)
-        {
-            signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
-        }
+        memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
         vecHw.copyToHw(angleTerms, 0, 512, 2 * WINDOW_SIZE);
         vecHw.copyToHw(angleTerms, WINDOW_SIZE, 256, 3 * WINDOW_SIZE);
@@ -96,22 +99,21 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-#define REAL(x) x + 32 * i
-#define IMAG(x) WINDOW_SIZE + x + 32 * i
-
-uint16_t reverse_bits(uint16_t x) {
-    x = ((x & 0xAAAA) >> 1) | ((x & 0x5555) << 1);
-    x = ((x & 0xCCCC) >> 2) | ((x & 0x3333) << 2);
-    x = ((x & 0xF0F0) >> 4) | ((x & 0x0F0F) << 4);
-    x = ((x & 0xFF00) >> 8) | ((x & 0x00FF) << 8);
-    return x >> 6;
-}
-
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
 
-    vecHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
+    std::vector<ec::Float> temp(2 * WINDOW_SIZE);
+
+    memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
+    memcpy(temp.data() + WINDOW_SIZE, blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
+
+    vecHw.copyToHw(temp, 0, 2 * WINDOW_SIZE, 0);
+
+    for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
+    {
+        vecHw.mul32(32 * i, WINDOW_SIZE + 32 * i, 32 * i);
+    }
 
     int c = WINDOW_SIZE / 2;
 
@@ -129,9 +131,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
         // now we can assign it to [0 - C] because we're done reading it
         vecHw.assign32(IMAG(0), REAL(0));
-
-        vecHw.mul32(IMAG(0), ec::Float(0.0f), IMAG(0));
     }
+
+    vecHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // reset IMAG(0)
 
     /*
     input[C - 2C] * omega[0 through C] # this is complex multiplication
@@ -147,7 +149,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
 
-    while (c > 4) // sweet spot
+    while (c > SWEET_SPOT) // sweet spot
     {
         c /= 2;
 
@@ -246,8 +248,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
-    vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
-    vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
+    vecHw.copyFromHw(temp, 0, 2 * WINDOW_SIZE, 0);
+
+    memcpy(inputReal.data(), temp.data(), WINDOW_SIZE * sizeof(ec::Float));
+    memcpy(inputImag.data(), temp.data() + WINDOW_SIZE, WINDOW_SIZE * sizeof(ec::Float));
 
     std::vector<ec::Float> buffer(32);
 
@@ -280,8 +284,23 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
             for (size_t k = 0; k < c; k++)
             {
-                buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
-                inputImag[vals + k] += inputImag[valsC + k];
+                if (j == 0)
+                {
+                    memcpy(buffer.data() + k, inputImag.data() + vals + k, sizeof(ec::Float));
+                }
+                else
+                {
+                    buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
+
+                    if (k == 0 && j == 1)
+                    {
+                        memcpy(inputImag.data() + vals + k, inputImag.data() + valsC + k, sizeof(ec::Float));
+                    }
+                    else
+                    {
+                        inputImag[vals + k] += inputImag[valsC + k];
+                    }
+                }
             }
 
             memcpy(inputImag.data() + valsC, buffer.data(), c * sizeof(ec::Float));
@@ -301,35 +320,36 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         {
             size_t realC = c;
             size_t imagC = c;
-            size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
-            size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
-            size_t buf2 = 3 * WINDOW_SIZE + 32 * i;
 
             // example of complex multiplication:
             // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
             // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
             for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
             {
-                // vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-                // vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
-
-                // vecHw.mul32(buf1, minusOne, buf1, std::min(c, 32)); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
-
-                // vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
-
-                // vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2, std::min(c, 32)); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
-
-                // vecHw.add32(buf0, buf1, realC, std::min(c, 32)); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-
-                // vecHw.add32(imagC, buf2, imagC, std::min(c, 32)); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
-
                 for (size_t k = 0; k < c; k++)
                 {
-                    buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
-                    inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                    if (k == 0)
+                    {
+                        if (c != 1)
+                        {
+                            memcpy(buffer.data() + k, inputReal.data() + realC + k, sizeof(ec::Float));
+                        }
+                    }
+                    else
+                    {
+                        buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                    }
+
+                    if (k != 0)
+                    {
+                        inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                    }
                 }
 
-                memcpy(inputReal.data() + realC, buffer.data(), c * sizeof(ec::Float));
+                if (c != 1)
+                {
+                    memcpy(inputReal.data() + realC, buffer.data(), c * sizeof(ec::Float));
+                }
 
                 // repeat for 3C, 5C, and 7C
                 realC += 2 * c;
@@ -338,37 +358,39 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
-
     // fix order of arrays
-    ec::Float temp(0.0f);
+    ec::Float swapVal;
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
         uint16_t newI = reverse_bits(i);
 
         if (i < newI)
         {
-            memcpy(&temp, inputReal.data() + i, sizeof(ec::Float));
+            memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
             memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
-            memcpy(inputReal.data() + newI, &temp, sizeof(ec::Float));
+            memcpy(inputReal.data() + newI, &swapVal, sizeof(ec::Float));
 
-            memcpy(&temp, inputImag.data() + i, sizeof(ec::Float));
+            memcpy(&swapVal, inputImag.data() + i, sizeof(ec::Float));
             memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
-            memcpy(inputImag.data() + newI, &temp, sizeof(ec::Float));
+            memcpy(inputImag.data() + newI, &swapVal, sizeof(ec::Float));
         }
     }
 }
 
 void init_angleTerms()
 {
-    size_t idx = 0;
-
     float aC(float(-2.0f * M_PI) / WINDOW_SIZE);
 
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
-        angleTerms[idx] = std::cos(aC * i);
-        angleTerms[idx + WINDOW_SIZE] = std::sin(aC * i);
-        idx++;
+        float co = std::cos(aC * i);
+        // this might be allowed???
+        memcpy(angleTerms.data() + i, &co, sizeof(ec::Float));
+        // angleTerms[i] = std::cos(aC * i); 
+
+        float si = std::sin(aC * i);
+        memcpy(angleTerms.data() + i + WINDOW_SIZE, &si, sizeof(ec::Float));
+        // angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
     }
 
     size_t x = WINDOW_SIZE / 4;
@@ -386,96 +408,21 @@ void init_angleTerms()
     }
 }
 
-/*
-    We are computing this operation:
-
-    ec::Float blackmanWinCoef = 0.42f - 0.5f * ec_cos(ec::Float(i) * 2.0f * PI / (WINDOW_SIZE - 1));
-    blackmanWinCoef = blackmanWinCoef + 0.08f * ec_cos(ec::Float(i) * 4.0f * PI / (WINDOW_SIZE - 1));
-
-    across the entire input vector.
-    this will in-place modify the input vector.
-
-*/
-void init_blackmanCoefs(std::vector<ec::Float>& input)
+void init_blackmanCoefs()
 {
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    vecHw.resetMemTo0();
-
-    // we will be assuming input will be size WINDOW_SIZE
-    assert(input.size() == WINDOW_SIZE);
-    // but we should double check that
-
-    const size_t halfSize = WINDOW_SIZE / 2;
-
-
-    // micro optimization, we can skip 0 because vecHw memory is reset to 0
-    for (size_t i = 1; i < halfSize; ++i)
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
-        input[i] = i;
+        float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
+        memcpy(blackmanCoefs.data() + i, &coef, sizeof(ec::Float));
+        // blackmanCoefs[i] = ec::Float(coef);
     }
+}
 
-    vecHw.copyToHw(input, 1, halfSize - 1, 1);
-
-    // TODO see if we can pipeline this to be faster
-    // multiplaction by constants
-    for (size_t i = 0; i < WINDOW_SIZE / 64; ++i)
-    {
-        vecHw.mul32(32 * i, ec::Float(float(4.0f * M_PI) / (WINDOW_SIZE - 1)), WINDOW_SIZE + 32 * i);
-        vecHw.mul32(32 * i, ec::Float(float(2.0f * M_PI) / (WINDOW_SIZE - 1)), 32 * i);
-    }
-
-    // in-place cosine operations
-    for (size_t i = 0; i < WINDOW_SIZE / 8; ++i)
-    {
-        vecHw.cos4(4 * i, 4 * i);
-        vecHw.cos4(WINDOW_SIZE + 4 * i, WINDOW_SIZE + 4 * i);
-    }
-
-    /*
-        outputs of vector calculated cosine values:
-        0 - WINDOW_SIZE-1:               ec_cos(ec::Float(i) * 2.0f * PI / (WINDOW_SIZE - 1)); (first cosine)
-        WINDOW_SIZE - 2*WINDOW_SIZE - 1: ec_cos(ec::Float(i) * 4.0f * PI / (WINDOW_SIZE - 1)); (second cosine)
-    */
-    std::vector<ec::Float> cosOut(2 * WINDOW_SIZE);
-
-    vecHw.copyFromHw(cosOut, 0, halfSize, 0);
-    vecHw.copyFromHw(cosOut, WINDOW_SIZE, halfSize, WINDOW_SIZE);
-
-    for (size_t i = 0; i < halfSize; i++)
-    {
-        memcpy(cosOut.data() + halfSize + i, cosOut.data() + halfSize - i - 1, sizeof(ec::Float));
-        memcpy(cosOut.data() + WINDOW_SIZE + halfSize + i, cosOut.data() + WINDOW_SIZE + halfSize - i - 1, sizeof(ec::Float));
-    }
-
-    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-    streamHw.resetStreamHw();
-
-    streamHw.copyToHw(cosOut, 0, 2 * WINDOW_SIZE, 0);
-
-    streamHw.createFifos(6);
-
-    // -0.5 * first cosine
-    streamHw.addOpMulToPipeline(0, ec::Float(-0.5f), 1);
-
-    // 0.42 + first cosine
-    streamHw.addOpAddToPipeline(1, ec::Float(0.42f), 2);
-
-    // 0.08 * second cosine
-    streamHw.addOpMulToPipeline(3, ec::Float(0.08f), 4);
-
-    // first cosine + second cosine
-    streamHw.addOpAddToPipeline(2, 4, 5);
-
-    // stream first cosine into fifo 0
-    streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
-
-    // stream second cosine into fifo 3
-    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 3, WINDOW_SIZE);
-
-    // stream output from fifo 5 to memory
-    streamHw.startStreamDataFifoToMem(5, 3 * WINDOW_SIZE, WINDOW_SIZE);
-
-    streamHw.runPipeline();
-
-    streamHw.copyFromHw(input, 3 * WINDOW_SIZE, WINDOW_SIZE, 0);
+uint16_t reverse_bits(uint16_t x)
+{
+    x = ((x & 0xAAAA) >> 1) | ((x & 0x5555) << 1);
+    x = ((x & 0xCCCC) >> 2) | ((x & 0x3333) << 2);
+    x = ((x & 0xF0F0) >> 4) | ((x & 0x0F0F) << 4);
+    x = ((x & 0xFF00) >> 8) | ((x & 0x00FF) << 8);
+    return x >> 6; // make it 10 bit
 }
