@@ -25,6 +25,7 @@ void init_blackmanCoefs(std::vector<ec::Float>& input);
 void init_angleTerms();
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
+void fft2(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
 
 static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
 
@@ -45,13 +46,10 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     init_blackmanCoefs(blackmanCoefs);
     init_angleTerms();
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+
 
     for (size_t j = 0; j < numWins; j++)
     {
-        vecHw.resetMemTo0();
-        vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
-
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
             signalWindow[i] = inputSignal[i + idxStartWin] * blackmanCoefs[i];
@@ -59,12 +57,30 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
-        fft(signalWindow, inImag, WINDOW_SIZE);
+        if (false)
+        {
+            ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+            vecHw.resetMemTo0();
+
+            vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE - 64, 0);
+            fft2(signalWindow, inImag, WINDOW_SIZE);
+
+        }
+        else
+        {
+            ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+            vecHw.resetMemTo0();
+
+            vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
+
+            fft(signalWindow, inImag, WINDOW_SIZE);
+        }
+
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
-
+            // std::cout << freqVal.toFloat() << std::endl;
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
             {
@@ -94,32 +110,47 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
+#define REAL(x) x + 32 * i
+#define IMAG(x) WINDOW_SIZE + x + 32 * i
+
+uint16_t reverse_bits(uint16_t x) {
+    x = ((x & 0xAAAA) >> 1) | ((x & 0x5555) << 1);
+    x = ((x & 0xCCCC) >> 2) | ((x & 0x3333) << 2);
+    x = ((x & 0xF0F0) >> 4) | ((x & 0x0F0F) << 4);
+    x = ((x & 0xFF00) >> 8) | ((x & 0x00FF) << 8);
+    return x >> 6;
+}
+
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
     // vecHw.resetMemTo0();
 
+    for (ec::Float i(1.0f); i <= 1024; i++)
+    {
+        inputReal[(int)i.toFloat() - 1] = i;
+    }
+
     vecHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
 
-    size_t c = WINDOW_SIZE / 2;
+    int c = WINDOW_SIZE / 2;
 
     // c = 512 only working with reals for now
     for (size_t i = 0; i < c / 32; i++)
     {
-        // [0 - C] = [0 - C] + [C - N]
-        vecHw.add32(32 * i, c + 32 * i, 32 * i);
-    }
+        // (-1)*inputReal[C - 2C]
+        vecHw.mul32(REAL(c), minusOne, IMAG(c)); // stick this in imag[C - 2C] for now. it will be fixed later
 
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        // (-1)*inputReal[C through N]
-        vecHw.mul32(c + 32 * i, minusOne, c + 32 * i);
-    }
+        // [0 - C] = [0 - C] + [C - 2C]
+        vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
 
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        // [C - N] = [0 - C] + (-1)*[C - N]
-        vecHw.add32(32 * i, c + 32 * i, c + 32 * i);
+        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+        vecHw.add32(REAL(0), IMAG(c), REAL(c));
+
+        // now we can assign it to [0 - C] because we're done reading it
+        vecHw.assign32(IMAG(0), REAL(0));
+
+        vecHw.mul32(IMAG(0), ec::Float(0.0f), IMAG(0)); // just in case. probably can remove later
     }
 
     /*
@@ -130,74 +161,219 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
    */
     for (size_t i = 0; i < c / 32; i++)
     {
-        vecHw.mul32(c + 32 * i, 2 * WINDOW_SIZE + 32 * i, c + 32 * i); // real [C - N] = real [C - N] * cos(C-N)
-        vecHw.mul32(c + 32 * i, 3 * WINDOW_SIZE + 32 * i, WINDOW_SIZE + c + 32 * i); // imag [C - N] = real[C - N] * sin(C-N)
+        vecHw.mul32(REAL(c), 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), IMAG(c)); // imag [C - 2C] = real[C - 2C] * sin(0 - C)
+        vecHw.mul32(REAL(c), 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), REAL(c)); // real [C - 2C] = real [C - 2C] * cos(0 - C)
     }
 
     // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
 
-    c = c / 2; // c = 256
+    // c = c / 2; // c = 256
 
-    for (size_t i = 0; i < c / 32; i++)
+    // for (size_t i = 0; i < c / 32; i++)
+    // {
+    //     size_t vals = REAL(0);
+    //     size_t valsC = REAL(c);
+    //     size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
+    //     size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
+
+    //     // (-1)*[C - 2C]
+    //     vecHw.mul32(valsC, minusOne, buf0);
+
+    //     // [0 - C] = [0 - C] + [C - 2C]
+    //     vecHw.add32(vals, valsC, buf1);
+
+    //     // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+    //     vecHw.add32(vals, buf0, valsC);
+
+    //     // [0 - C] = [0 - C] + [C - 2C]
+    //     vecHw.assign32(buf1, vals);
+
+    //     vals += 2 * c; // real[2C - 3C]
+    //     valsC += 2 * c; // real[3C - 4C]
+
+    //     // (-1)*[3C - 4C]
+    //     vecHw.mul32(valsC, minusOne, buf0);
+
+    //     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+    //     vecHw.add32(vals, buf0, buf1);
+
+    //     // [2C - 3C] = [2C - 3C] + [3C - 4C]
+    //     vecHw.add32(vals, valsC, vals);
+
+    //     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+    //     vecHw.assign32(buf1, valsC);
+
+    //     vals += WINDOW_SIZE; // imag[2C - 3C]
+    //     valsC += WINDOW_SIZE; // imag[3C - 4C]
+
+    //     // we now have imaginaries so we need to work with them.
+    //      // (-1)*[3C - 4C]
+    //     vecHw.mul32(valsC, minusOne, buf0);
+
+    //     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+    //     vecHw.add32(vals, buf0, buf1);
+
+    //     // [2C - 3C] = [2C - 3C] + [3C - 4C]
+    //     vecHw.add32(vals, valsC, vals);
+
+    //     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+    //     vecHw.assign32(buf1, valsC);
+    // }
+
+
+    // // input[C - 2C] * omega[0 through C] 
+    // // input[3C - 4C] * omega[0 through C] 
+    // for (size_t i = 0; i < c / 32; i++)
+    // {
+    //     size_t realC = REAL(c);
+    //     size_t imagC = IMAG(c);
+    //     size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
+    //     size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
+    //     size_t buf2 = 3 * WINDOW_SIZE + 32 * i;
+
+    //     for (size_t j = 0; j < 2; j++)
+    //     {
+    //         vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+    //         vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
+    //         vecHw.mul32(buf1, minusOne, buf1); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
+
+    //         vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+
+    //         vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+
+    //         vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+
+    //         vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+
+    //         // repeat for 3C
+    //         realC += 2 * c;
+    //         imagC += 2 * c;
+    //     }
+    // }
+
+    // vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
+    // vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
+    // std::cout << inputReal[512].toFloat() << " " << inputReal[513].toFloat() << " " << inputReal[514].toFloat() << " " << inputReal[515].toFloat() << std::endl;
+    // std::cout << inputReal[512 + 128].toFloat() << " " << inputReal[513 + 128].toFloat() << " " << inputReal[514 + 128].toFloat() << " " << inputReal[515 + 128].toFloat() << std::endl;
+    // std::cout << inputImag[512 + 256].toFloat() << " " << inputImag[513 + 256].toFloat() << " " << inputImag[514 + 256].toFloat() << " " << inputImag[515 + 256].toFloat() << std::endl;
+    while (c > 1)
     {
-        // [0 - C] = [0 - C] + [C - 2C]
-        vecHw.add32(32 * i, c + 32 * i, 32 * i);
+        c /= 2;
 
-        // [2C - 3C] = [2C - 3C] + [3C - 4C]
-        vecHw.add32(2 * c + 32 * i, 3 * c + 32 * i, 2 * c + 32 * i);
+        for (size_t i = 0; i < std::max(1, c / 32); i++)
+        {
+            size_t vals = REAL(0);
+            size_t valsC = REAL(c);
+            size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
+            size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
 
-        // we now have imaginaries so we need to work with them.
-        vecHw.add32(WINDOW_SIZE + 2 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i, WINDOW_SIZE + 2 * c + 32 * i);
+            // we need to run for real and imaginary
+            // [0 - C] = [0 - C] + [C - 2C]
+            // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+            // [2C - 3C] = [2C- 3C] + [3C - 4C]
+            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+
+            // [4C - 5C] = [4C - 5C] + [5C - 6C]
+            // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
+            // [6C - 7C] = [6C - 7C] + [7C - 8C]
+            // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
+            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
+            {
+                // (-1)*[3C - 4C]
+                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+
+                // [2C - 3C] = [2C - 3C] + [3C - 4C]
+                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.assign32(buf1, valsC, std::min(c, 32));
+
+                vals += WINDOW_SIZE; // imag
+                valsC += WINDOW_SIZE; // imag
+
+                // imaginaries
+                // (-1)*[3C - 4C]
+                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+
+                // [2C - 3C] = [2C - 3C] + [3C - 4C]
+                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.assign32(buf1, valsC, std::min(c, 32));
+
+                vals -= WINDOW_SIZE;
+                vals += 2 * c;
+
+                valsC -= WINDOW_SIZE;
+                valsC += 2 * c;
+            }
+        }
+
+        // input[C - 2C] * omega[0 through C] 
+        // input[3C - 4C] * omega[0 through C] 
+        // input[5C - 6C] * omega[0 through C] 
+        // input[7C - 8C] * omega[0 through C] 
+        for (size_t i = 0; i < std::max(1, c / 32); i++)
+        {
+            size_t realC = REAL(c);
+            size_t imagC = IMAG(c);
+            size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
+            size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
+            size_t buf2 = 3 * WINDOW_SIZE + 32 * i;
+
+            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
+            {
+                vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+                vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
+                vecHw.mul32(buf1, minusOne, buf1); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
+
+                vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+
+                vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2, std::min(c, 32)); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+
+                vecHw.add32(buf0, buf1, realC, std::min(c, 32)); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+
+                vecHw.add32(imagC, buf2, imagC, std::min(c, 32)); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+
+                // repeat for 3C, 5C, and 7C
+                realC += 2 * c;
+                imagC += 2 * c;
+            }
+        }
     }
 
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        // (-1)*[C - 2C]
-        vecHw.mul32(c + 32 * i, minusOne, c + 32 * i);
 
-        // (-1)*[3C - 4C]
-        vecHw.mul32(3 * c + 32 * i, minusOne, 3 * c + 32 * i);
-        vecHw.mul32(WINDOW_SIZE + 3 * c + 32 * i, minusOne, WINDOW_SIZE + 3 * c + 32 * i);
+    vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
+    vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
+
+    // fix order of arrays
+    ec::Float temp(0.0f);
+    for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
+    {
+        uint16_t newI = reverse_bits(i);
+        memcpy(&temp, inputReal.data() + i, sizeof(ec::Float));
+        memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
+        memcpy(inputReal.data() + newI, &temp, sizeof(ec::Float));
+
+        memcpy(&temp, inputImag.data() + i, sizeof(ec::Float));
+        memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
+        memcpy(inputImag.data() + newI, &temp, sizeof(ec::Float));
     }
 
+    //  vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
+    // vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
 
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-        vecHw.add32(32 * i, c + 32 * i, 32 * i);
-
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-        vecHw.add32(2 * c + 32 * i, 3 * c + 32 * i, 3 * c + 32 * i);
-        vecHw.add32(WINDOW_SIZE + 2 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i, WINDOW_SIZE + 3 * c + 32 * i);
-    }
-
-
-    // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
-
-    // input[C - 2C] * omega[0 through C] 
-    // input[3C - 4C] * omega[0 through C] 
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        size_t realC = c + 32 * i;
-        size_t imagC = WINDOW_SIZE + c + 32 * i;
-        size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
-        size_t buf1 = 3 * WINDOW_SIZE + 32 * i;
-
-        vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + 2 * c, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-        vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + 2 * c, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
-        vecHw.mul32(buf1, minusOne, buf1); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
-
-        vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + 2 * c, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
-        // vecHw.mul32(c + 32 * i, 3 * WINDOW_SIZE + 32 * i + 2 * c, WINDOW_SIZE + c + 32 * i); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
-
-        vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-
-
-    }
-
-
+    std::cout << inputReal[0].toFloat() << " " << inputReal[1].toFloat() << " " << inputReal[2].toFloat() << " " << inputReal[3].toFloat() << std::endl;
+    std::cout << inputImag[0].toFloat() << " " << inputImag[1].toFloat() << " " << inputImag[2].toFloat() << " " << inputImag[3].toFloat() << std::endl;
+    // std::cout << inputReal[256].toFloat() << " " << inputReal[257].toFloat() << " " << inputReal[258].toFloat() << " " << inputReal[259].toFloat() << std::endl;
+    exit(1);
 }
-
 
 // This algorithm breaks everything up recursively into many function calls
 // if we can somehow make it iterative and have access to all of it's working arrays
@@ -225,8 +401,8 @@ void fft2(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, 
             memcpy(oddI.data() + i, inputImag.data() + i * 2 + 1, sizeof(ec::Float));
         }
 
-        fft(even, evenI, halfCount);
-        fft(odd, oddI, halfCount);
+        fft2(even, evenI, halfCount);
+        fft2(odd, oddI, halfCount);
     }
     else
     {
@@ -359,30 +535,59 @@ void fft2(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, 
 
 void init_angleTerms()
 {
-    size_t count = WINDOW_SIZE;
-
     size_t idx = 0;
 
-    while (count >= 2)
+    ec::Float aC(float(-2.0f * M_PI) / WINDOW_SIZE);
+
+    for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
-        ec::Float aC(float(-2.0f * M_PI) / count);
+        angleTerms[idx] = ec_cos(aC * i);
+        angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
+        idx++;
+    }
 
-        for (size_t i = 0; i < count / 2; i++)
+    size_t x = WINDOW_SIZE / 4;
+    size_t y = 2;
+    while (x > 0)
+    {
+        for (size_t i = 0; i < x; i += y)
         {
-            if (i != 0)
-            {
-                // if (!(idx >= 977 && idx <= 991 || idx >= 1001 && idx <= 1007 || idx >= 1013 && idx <= 1015 || idx == 1019))
-                // {
-                angleTerms[idx] = ec_cos(aC * i);
-                angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
-                // }
-            }
-
-            idx++;
+            memcpy(angleTerms.data() + WINDOW_SIZE - (2 * x) + i / y, angleTerms.data() + i, sizeof(ec::Float));
+            memcpy(angleTerms.data() + WINDOW_SIZE + WINDOW_SIZE - (2 * x) + i / y, angleTerms.data() + WINDOW_SIZE + i, sizeof(ec::Float));
         }
 
-        count >>= 1;
+        x /= 2;
+        y *= 2;
     }
+
+
+
+
+
+
+    // size_t count = WINDOW_SIZE;
+
+
+    // while (count >= 2)
+    // {
+
+
+    //     for (size_t i = 0; i < count / 2; i++)
+    //     {
+    //         if (i != 0)
+    //         {
+    //             // if (!(idx >= 977 && idx <= 991 || idx >= 1001 && idx <= 1007 || idx >= 1013 && idx <= 1015 || idx == 1019))
+    //             // {
+    //             angleTerms[idx] = ec_cos(aC * i);
+    //             angleTerms[idx + WINDOW_SIZE] = ec_sin(aC * i);
+    //             // }
+    //         }
+    //          idx++;
+
+    //     }
+
+    //     count >>= 1;
+    // }
 }
 
 /*
