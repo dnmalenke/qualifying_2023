@@ -54,7 +54,6 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
     vecHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE - SWEET_SPOT, 2 * WINDOW_SIZE);
 
-
     for (size_t j = 0; j < numWins; j++)
     {
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
@@ -271,12 +270,17 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         // [4C - 5C] = [4C - 5C] + [5C - 6C]
         // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
         // [6C - 7C] = [6C - 7C] + [7C - 8C]
-        // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
+        // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]        
+
         for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
         {
             for (size_t k = 0; k < c; k++)
             {
-                buffer[k] = inputReal[vals + k] - inputReal[valsC + k];
+                if (c != 1 || reverse_bits(valsC) <= 512)
+                {
+                    buffer[k] = inputReal[vals + k] - inputReal[valsC + k];
+                }
+
                 inputReal[vals + k] += inputReal[valsC + k];
             }
 
@@ -290,7 +294,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 }
                 else
                 {
-                    buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
+                    if (c != 1 || reverse_bits(valsC) <= 512)
+                    {
+                        buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
+                    }
 
                     if (k == 0 && j == 1)
                     {
@@ -312,49 +319,47 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             valsC += 2 * c;
         }
 
-        // input[C - 2C] * omega[0 through C] 
-        // input[3C - 4C] * omega[0 through C] 
-        // input[5C - 6C] * omega[0 through C] 
-        // input[7C - 8C] * omega[0 through C] 
-        size_t i = 0;
+        if (c == 1)
         {
-            size_t realC = c;
-            size_t imagC = c;
+            break;
+        }
 
-            // example of complex multiplication:
-            // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
-            // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
-            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
+        size_t realC = c;
+        size_t imagC = c;
+
+        // example of complex multiplication:
+        // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
+        // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
+        for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
+        {
+            for (size_t k = 0; k < c; k++)
             {
-                for (size_t k = 0; k < c; k++)
+                if (k == 0)
                 {
-                    if (k == 0)
+                    if (c != 1)
                     {
-                        if (c != 1)
-                        {
-                            memcpy(buffer.data() + k, inputReal.data() + realC + k, sizeof(ec::Float));
-                        }
-                    }
-                    else
-                    {
-                        buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
-                    }
-
-                    if (k != 0)
-                    {
-                        inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                        memcpy(buffer.data() + k, inputReal.data() + realC + k, sizeof(ec::Float));
                     }
                 }
-
-                if (c != 1)
+                else
                 {
-                    memcpy(inputReal.data() + realC, buffer.data(), c * sizeof(ec::Float));
+                    buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
                 }
 
-                // repeat for 3C, 5C, and 7C
-                realC += 2 * c;
-                imagC += 2 * c;
+                if (k != 0)
+                {
+                    inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                }
             }
+
+            if (c != 1)
+            {
+                memcpy(inputReal.data() + realC, buffer.data(), c * sizeof(ec::Float));
+            }
+
+            // repeat for 3C, 5C, and 7C
+            realC += 2 * c;
+            imagC += 2 * c;
         }
     }
 
@@ -384,7 +389,7 @@ void init_angleTerms()
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
         float co = std::cos(aC * i);
-        angleTerms[i] = std::cos(aC * i); 
+        angleTerms[i] = std::cos(aC * i);
 
         float si = std::sin(aC * i);
         angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
