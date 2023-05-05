@@ -384,13 +384,10 @@ void init_angleTerms()
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
         float co = std::cos(aC * i);
-        // this might be allowed???
-        memcpy(angleTerms.data() + i, &co, sizeof(ec::Float));
-        // angleTerms[i] = std::cos(aC * i); 
+        angleTerms[i] = std::cos(aC * i); 
 
         float si = std::sin(aC * i);
-        memcpy(angleTerms.data() + i + WINDOW_SIZE, &si, sizeof(ec::Float));
-        // angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
+        angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
     }
 
     size_t x = WINDOW_SIZE / 4;
@@ -413,8 +410,7 @@ void init_blackmanCoefs()
     for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
         float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
-        memcpy(blackmanCoefs.data() + i, &coef, sizeof(ec::Float));
-        // blackmanCoefs[i] = ec::Float(coef);
+        blackmanCoefs[i] = ec::Float(coef);
     }
 }
 
