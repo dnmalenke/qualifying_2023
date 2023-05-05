@@ -110,21 +110,6 @@ uint16_t reverse_bits(uint16_t x) {
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
 {
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-    // vecHw.resetMemTo0();
-
-    // for (ec::Float i(1.0f); i <= 1024; i++)
-    // {
-    //     inputReal[(int)i.toFloat() - 1] = i;
-    // }
-
-    // for (size_t i = 0; i < WINDOW_SIZE; i++)
-    // {
-    //     // Use a sine wave with increasing frequency for the real part
-    //     inputReal[i] = std::sin(i * 2.0 * M_PI / WINDOW_SIZE);
-
-    //     // Use a cosine wave with decreasing frequency for the imaginary part
-    //     // inputImag[i] = std::cos((WINDOW_SIZE - i) * 2.0 * M_PI / WINDOW_SIZE);
-    // }
 
     vecHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
 
@@ -162,11 +147,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
 
-    // vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
-    // vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
-    // std::cout << inputReal[512].toFloat() << " " << inputReal[513].toFloat() << " " << inputReal[514].toFloat() << " " << inputReal[515].toFloat() << std::endl;
-    // std::cout << inputReal[512 + 128].toFloat() << " " << inputReal[513 + 128].toFloat() << " " << inputReal[514 + 128].toFloat() << " " << inputReal[515 + 128].toFloat() << std::endl;
-    // std::cout << inputImag[512 + 256].toFloat() << " " << inputImag[513 + 256].toFloat() << " " << inputImag[514 + 256].toFloat() << " " << inputImag[515 + 256].toFloat() << std::endl;
     while (c > 1)
     {
         c /= 2;
