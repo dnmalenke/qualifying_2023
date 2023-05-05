@@ -47,7 +47,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     init_angleTerms();
 
 
-    for (size_t j = 0; j < numWins; j++)
+    for (size_t j = 0; j < 1; j++)
     {
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
@@ -65,8 +65,9 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
+            // std::cout << signalWindow[i].toFloat() << std::endl;
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
-            // std::cout << freqVal.toFloat() << std::endl;
+            std::cout << sqrt(freqVal.toFloat()) << std::endl;
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
             {
@@ -116,6 +117,15 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     {
         inputReal[(int)i.toFloat() - 1] = i;
     }
+
+    // for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // {
+    //     // Use a sine wave with increasing frequency for the real part
+    //     inputReal[i] = std::sin(i * 2.0 * M_PI / WINDOW_SIZE);
+
+    //     // Use a cosine wave with decreasing frequency for the imaginary part
+    //     // inputImag[i] = std::cos((WINDOW_SIZE - i) * 2.0 * M_PI / WINDOW_SIZE);
+    // }
 
     vecHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
 
@@ -229,10 +239,14 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
             size_t buf2 = 3 * WINDOW_SIZE + 32 * i;
 
+            // example of complex multiplication:
+            // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
+            // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
             for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
             {
                 vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
                 vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE 
+
                 vecHw.mul32(buf1, minusOne, buf1, std::min(c, 32)); // (-1)* (imag [C - 2C] *  sin(C-2C)) THIS CAN BE OPTIMIZED BY PRE-NEGATING THE SIN TERMS
 
                 vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
@@ -258,27 +272,31 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
     {
         uint16_t newI = reverse_bits(i);
-        memcpy(&temp, inputReal.data() + i, sizeof(ec::Float));
-        memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
-        memcpy(inputReal.data() + newI, &temp, sizeof(ec::Float));
 
-        memcpy(&temp, inputImag.data() + i, sizeof(ec::Float));
-        memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
-        memcpy(inputImag.data() + newI, &temp, sizeof(ec::Float));
+        if (i < newI)
+        {
+            memcpy(&temp, inputReal.data() + i, sizeof(ec::Float));
+            memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
+            memcpy(inputReal.data() + newI, &temp, sizeof(ec::Float));
+
+            memcpy(&temp, inputImag.data() + i, sizeof(ec::Float));
+            memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
+            memcpy(inputImag.data() + newI, &temp, sizeof(ec::Float));
+        }
     }
 
-    //  vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
+    // vecHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
     // vecHw.copyFromHw(inputImag, WINDOW_SIZE, WINDOW_SIZE, 0);
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
-    {
-        std::cout << "i: " << i << " " << inputReal[i].toFloat() << " " << inputImag[i].toFloat() << std::endl;
-    }
+    // for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // {
+    //     std::cout << "i: " << i << " " << inputReal[i].toFloat() << " " << inputImag[i].toFloat() << std::endl;
+    // }
 
 
     // std::cout << inputReal[0].toFloat() << " " << inputReal[1].toFloat() << " " << inputReal[2].toFloat() << " " << inputReal[3].toFloat() << std::endl;
     // std::cout << inputImag[0].toFloat() << " " << inputImag[1].toFloat() << " " << inputImag[2].toFloat() << " " << inputImag[3].toFloat() << std::endl;
     // std::cout << inputReal[256].toFloat() << " " << inputReal[257].toFloat() << " " << inputReal[258].toFloat() << " " << inputReal[259].toFloat() << std::endl;
-    exit(1);
+    // exit(1);
 }
 
 void init_angleTerms()
