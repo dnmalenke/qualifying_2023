@@ -47,7 +47,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     init_angleTerms();
 
 
-    for (size_t j = 0; j < 1; j++)
+    for (size_t j = 0; j < numWins; j++)
     {
         for (size_t i = 0; i < WINDOW_SIZE; i++)
         {
@@ -65,9 +65,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            // std::cout << signalWindow[i].toFloat() << std::endl;
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
-            std::cout << sqrt(freqVal.toFloat()) << std::endl;
+
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
             {
@@ -113,10 +112,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
     // vecHw.resetMemTo0();
 
-    for (ec::Float i(1.0f); i <= 1024; i++)
-    {
-        inputReal[(int)i.toFloat() - 1] = i;
-    }
+    // for (ec::Float i(1.0f); i <= 1024; i++)
+    // {
+    //     inputReal[(int)i.toFloat() - 1] = i;
+    // }
 
     // for (size_t i = 0; i < WINDOW_SIZE; i++)
     // {
