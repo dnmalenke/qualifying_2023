@@ -130,7 +130,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         // now we can assign it to [0 - C] because we're done reading it
         vecHw.assign32(IMAG(0), REAL(0));
 
-        vecHw.mul32(IMAG(0), ec::Float(0.0f), IMAG(0)); // just in case. probably can remove later
+        vecHw.mul32(IMAG(0), ec::Float(0.0f), IMAG(0));
     }
 
     /*
@@ -272,7 +272,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         {
             for (size_t k = 0; k < c; k++)
             {
-                buffer[k] = inputReal[vals + k] + minusOne * inputReal[valsC + k];
+                buffer[k] = inputReal[vals + k] - inputReal[valsC + k];
                 inputReal[vals + k] += inputReal[valsC + k];
             }
 
@@ -280,7 +280,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
             for (size_t k = 0; k < c; k++)
             {
-                buffer[k] = inputImag[vals + k] + minusOne * inputImag[valsC + k];
+                buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
                 inputImag[vals + k] += inputImag[valsC + k];
             }
 
@@ -325,7 +325,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
                 for (size_t k = 0; k < c; k++)
                 {
-                    buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + minusOne * (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
+                    buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
                     inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
                 }
 
