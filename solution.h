@@ -182,7 +182,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             // here c = 128, so 4 pairs of cross addition and complex multiplication needs to happen
             /*
             | -- cross addition -- | | complex multiplication |
-            
+
             j = 0
 
             j * c   ----\--/---- : vals
@@ -417,6 +417,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
 }
 
+
+/*
+    The below functions have zero or absolute minimal cost.
+*/
 void init_angleTerms()
 {
     float aC(float(-2.0f * M_PI) / WINDOW_SIZE);
