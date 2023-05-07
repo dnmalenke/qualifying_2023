@@ -108,6 +108,8 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     vecHw.copyToHw(temp, 0, 2 * WINDOW_SIZE, 0);
 
+    // apply the blackman coefficients to input data
+    // these are stored the location of the imaginary input data because we don't have any
     for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
     {
         vecHw.mul32(32 * i, WINDOW_SIZE + 32 * i, 32 * i);
@@ -154,10 +156,15 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     {
         c /= 2;
 
+        // when the arrays we are working with are larger than 32, our operations need to be chunked out into chunks of 32
+        // the variable i tracks which chunk we are currently in
         for (size_t i = 0; i < std::max(1, c / 32); i++)
         {
             size_t vals = REAL(0);
             size_t valsC = REAL(c);
+
+            size_t realC = REAL(c);
+            size_t imagC = IMAG(c);
 
             // we need to run for real and imaginary
             // [0 - C] = [0 - C] + [C - 2C]
@@ -169,8 +176,44 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
             // [6C - 7C] = [6C - 7C] + [7C - 8C]
             // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
+
+            // this is the pair loop
+            // it will repeat for each pair of matricies that need to be processed
+            // here c = 128, so 4 pairs of cross addition and complex multiplication needs to happen
+            /*
+            | -- cross addition -- | | complex multiplication |
+            
+            j = 0
+
+            j * c   ----\--/---- : vals
+                         \/
+                         /\
+            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
+
+            j++
+
+            j * c   ----\--/---- : vals
+                         \/
+                         /\
+            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
+
+            j++
+
+            j * c   ----\--/---- : vals
+                         \/
+                         /\
+            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
+
+            j++
+
+            j * c   ----\--/---- : vals
+                         \/
+                         /\
+            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
+            */
             for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
             {
+                // addition stage:
                 // (-1)*[3C - 4C]
                 vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
 
@@ -183,10 +226,11 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
                 vecHw.assign32(buf1, valsC, std::min(c, 32));
 
-                vals += WINDOW_SIZE; // imag
-                valsC += WINDOW_SIZE; // imag
+                // offset to imaginary numbers and do it again
+                vals += WINDOW_SIZE;
+                valsC += WINDOW_SIZE;
 
-                if (j != 0 && (c != 256 || c != 128 || c != 64 || c != 32))
+                if (j != 0) // manually exclude times where imaginary numbers aren't populated
                 {
                     // imaginaries
                     // (-1)*[3C - 4C]
@@ -202,31 +246,14 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                     vecHw.assign32(buf1, valsC, std::min(c, 32));
                 }
 
+                // remove the imaginary val offset and move on to the next pair
                 vals -= WINDOW_SIZE;
                 vals += 2 * c;
 
                 valsC -= WINDOW_SIZE;
                 valsC += 2 * c;
-            }
-        }
 
-        // input[C - 2C] * omega[0 through C] 
-        // input[3C - 4C] * omega[0 through C] 
-        // input[5C - 6C] * omega[0 through C] 
-        // input[7C - 8C] * omega[0 through C] 
-
-        // when the arrays we are working with are larger than 32, our operations need to be chunked out into chunks of 32
-        // the variable i tracks which chunk we are currently in
-        for (size_t i = 0; i < std::max(1, c / 32); i++)
-        {
-            size_t realC = REAL(c);
-            size_t imagC = IMAG(c);
-
-            // example of complex multiplication:
-            // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
-            // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
-            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
-            {
+                // complex multiplication stage:
                 vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
 
                 if (j != 0)
@@ -279,8 +306,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         // [4C - 5C] = [4C - 5C] + [5C - 6C]
         // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
         // [6C - 7C] = [6C - 7C] + [7C - 8C]
-        // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]        
-
+        // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
         for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
         {
             for (size_t k = 0; k < c; k++)
