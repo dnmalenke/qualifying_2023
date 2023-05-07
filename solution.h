@@ -58,8 +58,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     {
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
-        vecHw.copyToHw(angleTerms, 0, 512, 2 * WINDOW_SIZE);
-        vecHw.copyToHw(angleTerms, WINDOW_SIZE, 256, 3 * WINDOW_SIZE);
+        vecHw.copyToHw(angleTerms, 0, 96, 2 * WINDOW_SIZE); // cost 292. we *might* be able to recalculate those cosine terms faster?
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
@@ -147,6 +146,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
 
     // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
+    size_t buf0 = 2 * WINDOW_SIZE;
+    size_t buf1 = 2 * WINDOW_SIZE + 32;
+    size_t buf2 = 2 * WINDOW_SIZE + 64;
 
     while (c > SWEET_SPOT) // sweet spot
     {
@@ -156,8 +158,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         {
             size_t vals = REAL(0);
             size_t valsC = REAL(c);
-            size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
-            size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
 
             // we need to run for real and imaginary
             // [0 - C] = [0 - C] + [C - 2C]
@@ -214,13 +214,13 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         // input[3C - 4C] * omega[0 through C] 
         // input[5C - 6C] * omega[0 through C] 
         // input[7C - 8C] * omega[0 through C] 
+
+        // when the arrays we are working with are larger than 32, our operations need to be chunked out into chunks of 32
+        // the variable i tracks which chunk we are currently in
         for (size_t i = 0; i < std::max(1, c / 32); i++)
         {
             size_t realC = REAL(c);
             size_t imagC = IMAG(c);
-            size_t buf0 = 2 * WINDOW_SIZE + 32 * i;
-            size_t buf1 = 2 * WINDOW_SIZE + c + 32 * i;
-            size_t buf2 = 3 * WINDOW_SIZE + 32 * i;
 
             // example of complex multiplication:
             // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
@@ -424,7 +424,7 @@ void init_blackmanCoefs()
     for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
         float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
-        blackmanCoefs[i] = ec::Float(coef);
+        blackmanCoefs[i] = coef;
     }
 }
 
