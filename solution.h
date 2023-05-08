@@ -58,6 +58,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     {
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
+        // puts cosine terms back into vecHw. we were using that space for buffering
         vecHw.copyToHw(angleTerms, 0, 96, 2 * WINDOW_SIZE); // cost 292. we *might* be able to recalculate those cosine terms faster?
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
