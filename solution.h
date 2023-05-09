@@ -58,16 +58,13 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     {
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
-        // puts cosine terms back into vecHw. we were using that space for buffering
-        // vecHw.copyToHw(angleTerms, 0, 16, 2 * WINDOW_SIZE); // cost 292. we *might* be able to recalculate those cosine terms faster?
-
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
         fft(signalWindow, inImag, WINDOW_SIZE);
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
+            ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i >= 480 && i % 2 == 0) ? 0.0f : inImag[i] * inImag[i]);
 
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
@@ -105,18 +102,15 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     std::vector<ec::Float> temp(2 * WINDOW_SIZE);
 
     memcpy(temp.data(), inputReal.data(), 93 * sizeof(ec::Float));
-    memcpy(temp.data() + 93, blackmanCoefs.data(), 27 * sizeof(ec::Float));
+    memcpy(temp.data() + 93, blackmanCoefs.data(), 1 * sizeof(ec::Float));
 
-    vecHw.copyToHw(temp, 0, 120, 0);
+    vecHw.copyToHw(temp, 0, 119, 0);
 
     // apply the blackman coefficients to input data
     // these are stored the location of the imaginary input data because we don't have any
-    for (size_t i = 0; i < 1; i++)
-    {
-        vecHw.mul32(32 * i, 93 + 32 * i, 32 * i);
-    }
+    vecHw.mul32(0, 93, 0);
 
-    vecHw.resetMemTo0(512, 512); // reset IMAG(0)
+    vecHw.resetMemTo0(94, 2 * WINDOW_SIZE - 94); // reset IMAG(0)
 
     int c = WINDOW_SIZE / 2;
 
