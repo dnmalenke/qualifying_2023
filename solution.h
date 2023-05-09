@@ -59,7 +59,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
         // puts cosine terms back into vecHw. we were using that space for buffering
-        vecHw.copyToHw(angleTerms, 0, 96, 2 * WINDOW_SIZE); // cost 292. we *might* be able to recalculate those cosine terms faster?
+        vecHw.copyToHw(angleTerms, 0, 160, 2 * WINDOW_SIZE); // cost 292. we *might* be able to recalculate those cosine terms faster?
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
@@ -152,6 +152,8 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     size_t buf0 = 2 * WINDOW_SIZE;
     size_t buf1 = 2 * WINDOW_SIZE + 32;
     size_t buf2 = 2 * WINDOW_SIZE + 64;
+    size_t buf3 = 2 * WINDOW_SIZE + 96;
+    size_t buf4 = 2 * WINDOW_SIZE + 128;
 
     while (c > SWEET_SPOT) // sweet spot
     {
@@ -282,6 +284,115 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 imagC += 2 * c;
             }
         }
+
+
+        // rearrage step
+        if (c == 32 && true)
+        {
+            size_t i = 0;
+            size_t vals = REAL(0);
+            size_t valsC = REAL(c);
+
+            size_t realC = REAL(c);
+            size_t imagC = IMAG(c);
+
+            //todo do this while generating the angle terms
+            vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * 16), buf3, 16);
+            vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * 16), buf3 + 16, 16);
+            vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * 16), buf4, 16);
+            vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * 16), buf4 + 16, 16);
+
+            // for every other pair of 32 sized arrays
+            // we need to rearrange their layout            
+            // todo see if i can readd the j != 0 stuff again
+            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j ++)
+            {
+                // take the last 16 values from the first array and swap them with the first 16 values from the second array
+                vecHw.assign32(vals + 16, buf0, 16);
+                vecHw.assign32(valsC, vals + 16, 16);
+                vecHw.assign32(buf0, valsC, 16);
+
+                // now we can run the next set of addition but in 32 value chunks
+                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+
+                // [2C - 3C] = [2C - 3C] + [3C - 4C]
+                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.assign32(buf1, valsC, std::min(c, 32));
+
+                // offset to imaginary numbers and do it again
+                vals += WINDOW_SIZE;
+                valsC += WINDOW_SIZE;
+
+                // take the last 16 values from the first array and swap them with the first 16 values from the second array
+                vecHw.assign32(vals + 16, buf0, 16);
+                vecHw.assign32(valsC, vals + 16, 16);
+                vecHw.assign32(buf0, valsC, 16);
+
+                // imaginaries
+                // (-1)*[3C - 4C]
+                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+
+                // [2C - 3C] = [2C - 3C] + [3C - 4C]
+                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+
+                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+                vecHw.assign32(buf1, valsC, std::min(c, 32));
+
+                // complex multiplication stage:
+                vecHw.mul32(realC,buf3, buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+
+                vecHw.mul32(imagC, buf4, buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
+                vecHw.mul32(imagC, buf3, imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+
+                vecHw.mul32(realC, buf4, buf2, std::min(c, 32)); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+
+                vecHw.mul32(buf1, minusOne, buf1, std::min(c, 32)); // (-1)* (imag [C - 2C] *  sin(C-2C))
+                vecHw.add32(buf0, buf1, realC, std::min(c, 32)); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+                vecHw.add32(imagC, buf2, imagC, std::min(c, 32)); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+
+                // repeat for 3C, 5C, and 7C
+                realC += 2 * c;
+                imagC += 2 * c;
+
+                // take the last 16 values from the first array and swap them with the first 16 values from the second array
+                vecHw.assign32(vals + 16, buf0, 16);
+                vecHw.assign32(valsC, vals + 16, 16);
+                vecHw.assign32(buf0, valsC, 16);
+
+                // remove the imaginary val offset and move on to the next pair
+                vals -= WINDOW_SIZE;
+                valsC -= WINDOW_SIZE;
+
+                // take the last 16 values from the first array and swap them with the first 16 values from the second array
+                vecHw.assign32(vals + 16, buf0, 16);
+                vecHw.assign32(valsC, vals + 16, 16);
+                vecHw.assign32(buf0, valsC, 16);
+
+                vals += 2 * c;
+                valsC += 2 * c;
+            }
+
+            // for testing we're only running this on c=32
+            c /= 2;
+        }
+
+        // if (c == 16)
+        // {
+        //     vecHw.copyFromHw(temp, 0, 1024, 0);
+
+        //     for (size_t t = 0; t < 1024; t++)
+        //     {
+        //         std::cout << t << " " << temp[t].toFloat() << std::endl;
+        //     }
+        // }
     }
 
     vecHw.copyFromHw(temp, 0, 2 * WINDOW_SIZE, 0);
