@@ -122,7 +122,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     for (size_t i = 0; i < c / 32; i++)
     {
         // (-1)*inputReal[C - 2C]
-        vecHw.mul32(REAL(c), minusOne, IMAG(c)); // stick this in imag[C - 2C] for now. it will be fixed later
+        vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
 
         // [0 - C] = [0 - C] + [C - 2C]
         vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
@@ -305,7 +305,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             // for every other pair of 32 sized arrays
             // we need to rearrange their layout            
             // todo see if i can readd the j != 0 stuff again
-            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j ++)
+            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
             {
                 // take the last 16 values from the first array and swap them with the first 16 values from the second array
                 vecHw.assign32(vals + 16, buf0, 16);
@@ -313,16 +313,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 vecHw.assign32(buf0, valsC, 16);
 
                 // now we can run the next set of addition but in 32 value chunks
-                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+                vecHw.mul32(valsC, minusOne, buf0, 32);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+                vecHw.add32(vals, buf0, buf1);
 
                 // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+                vecHw.add32(vals, valsC, vals);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.assign32(buf1, valsC, std::min(c, 32));
+                vecHw.assign32(buf1, valsC);
 
                 // offset to imaginary numbers and do it again
                 vals += WINDOW_SIZE;
@@ -335,28 +335,28 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
                 // imaginaries
                 // (-1)*[3C - 4C]
-                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+                vecHw.mul32(valsC, minusOne, buf0, 32);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+                vecHw.add32(vals, buf0, buf1);
 
                 // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+                vecHw.add32(vals, valsC, vals);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.assign32(buf1, valsC, std::min(c, 32));
+                vecHw.assign32(buf1, valsC);
 
                 // complex multiplication stage:
-                vecHw.mul32(realC,buf3, buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+                vecHw.mul32(realC, buf3, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
 
-                vecHw.mul32(imagC, buf4, buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-                vecHw.mul32(imagC, buf3, imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+                vecHw.mul32(imagC, buf4, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
+                vecHw.mul32(imagC, buf3, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
 
-                vecHw.mul32(realC, buf4, buf2, std::min(c, 32)); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+                vecHw.mul32(realC, buf4, buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
 
-                vecHw.mul32(buf1, minusOne, buf1, std::min(c, 32)); // (-1)* (imag [C - 2C] *  sin(C-2C))
-                vecHw.add32(buf0, buf1, realC, std::min(c, 32)); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-                vecHw.add32(imagC, buf2, imagC, std::min(c, 32)); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+                vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
+                vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+                vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
 
                 // repeat for 3C, 5C, and 7C
                 realC += 2 * c;
@@ -528,7 +528,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 }
-
 
 /*
     The below functions have zero or absolute minimal cost.
