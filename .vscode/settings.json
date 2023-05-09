@@ -54,6 +54,7 @@
         "typeinfo": "cpp",
         "complex": "cpp",
         "cstring": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "forward_list": "cpp"
     }
 }
