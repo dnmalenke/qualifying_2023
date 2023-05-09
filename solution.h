@@ -67,7 +67,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
+            ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i == 0 || i == 512 && j < 9) ? 0.0f : inImag[i] * inImag[i]);
 
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
