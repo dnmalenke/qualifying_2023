@@ -400,20 +400,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
             for (size_t j = 0; j < WINDOW_SIZE / (2 * 32); j++)
             {
-                vecHw.assign32(vals + 8, buf0, c);
-                vecHw.assign32(vals + 16, vals + 8, c);
-                vecHw.assign32(buf0, vals + 16, c);
+                vecHw.assign32(vals + 16, buf0, 2 * c);
+                vecHw.assign32(vals + 32, vals + 16, 2 * c);
+                vecHw.assign32(buf0, vals + 32, 2 * c);
 
-                vecHw.assign32(vals + 16, buf0, c);
-                vecHw.assign32(vals + 32, vals + 16, c);
+                vecHw.assign32(vals + 8, buf0, c);
+                vecHw.assign32(vals + 32, vals + 8, c);
                 vecHw.assign32(buf0, vals + 32, c);
 
                 vecHw.assign32(vals + 24, buf0, c);
                 vecHw.assign32(vals + 48, vals + 24, c);
-                vecHw.assign32(buf0, vals + 48, c);
-
-                vecHw.assign32(vals + 40, buf0, c);
-                vecHw.assign32(vals + 48, vals + 40, c);
                 vecHw.assign32(buf0, vals + 48, c);
 
                 // now we can run the next set of addition but in 32 value chunks
@@ -432,20 +428,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 vals += WINDOW_SIZE;
                 valsC += WINDOW_SIZE;
 
-                vecHw.assign32(vals + 8, buf0, c);
-                vecHw.assign32(vals + 16, vals + 8, c);
-                vecHw.assign32(buf0, vals + 16, c);
+                vecHw.assign32(vals + 16, buf0, 2 * c);
+                vecHw.assign32(vals + 32, vals + 16, 2 * c);
+                vecHw.assign32(buf0, vals + 32, 2 * c);
 
-                vecHw.assign32(vals + 16, buf0, c);
-                vecHw.assign32(vals + 32, vals + 16, c);
+                vecHw.assign32(vals + 8, buf0, c);
+                vecHw.assign32(vals + 32, vals + 8, c);
                 vecHw.assign32(buf0, vals + 32, c);
 
                 vecHw.assign32(vals + 24, buf0, c);
                 vecHw.assign32(vals + 48, vals + 24, c);
-                vecHw.assign32(buf0, vals + 48, c);
-
-                vecHw.assign32(vals + 40, buf0, c);
-                vecHw.assign32(vals + 48, vals + 40, c);
                 vecHw.assign32(buf0, vals + 48, c);
 
                 // imaginaries
@@ -477,41 +469,33 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 realC += 64;
                 imagC += 64;
 
-                vecHw.assign32(vals + 16, buf0, c);
-                vecHw.assign32(vals + 32, vals + 16, c);
-                vecHw.assign32(buf0, vals + 32, c);
+                vecHw.assign32(vals + 24, buf0, c);
+                vecHw.assign32(vals + 48, vals + 24, c);
+                vecHw.assign32(buf0, vals + 48, c);
 
                 vecHw.assign32(vals + 8, buf0, c);
-                vecHw.assign32(vals + 16, vals + 8, c);
-                vecHw.assign32(buf0, vals + 16, c);
+                vecHw.assign32(vals + 32, vals + 8, c);
+                vecHw.assign32(buf0, vals + 32, c);
 
-                vecHw.assign32(vals + 24, buf0, c);
-                vecHw.assign32(vals + 40, vals + 24, c);
-                vecHw.assign32(buf0, vals + 40, c);
-
-                vecHw.assign32(vals + 40, buf0, c);
-                vecHw.assign32(vals + 48, vals + 40, c);
-                vecHw.assign32(buf0, vals + 48, c);
+                vecHw.assign32(vals + 16, buf0, 2 * c);
+                vecHw.assign32(vals + 32, vals + 16, 2 * c);
+                vecHw.assign32(buf0, vals + 32, 2 * c);
 
                 // remove the imaginary val offset and move on to the next pair
                 vals -= WINDOW_SIZE;
                 valsC -= WINDOW_SIZE;
 
-                vecHw.assign32(vals + 16, buf0, c);
-                vecHw.assign32(vals + 32, vals + 16, c);
-                vecHw.assign32(buf0, vals + 32, c);
+                vecHw.assign32(vals + 24, buf0, c);
+                vecHw.assign32(vals + 48, vals + 24, c);
+                vecHw.assign32(buf0, vals + 48, c);
 
                 vecHw.assign32(vals + 8, buf0, c);
-                vecHw.assign32(vals + 16, vals + 8, c);
-                vecHw.assign32(buf0, vals + 16, c);
+                vecHw.assign32(vals + 32, vals + 8, c);
+                vecHw.assign32(buf0, vals + 32, c);
 
-                vecHw.assign32(vals + 24, buf0, c);
-                vecHw.assign32(vals + 40, vals + 24, c);
-                vecHw.assign32(buf0, vals + 40, c);
-
-                vecHw.assign32(vals + 40, buf0, c);
-                vecHw.assign32(vals + 48, vals + 40, c);
-                vecHw.assign32(buf0, vals + 48, c);
+                vecHw.assign32(vals + 16, buf0, 2 * c);
+                vecHw.assign32(vals + 32, vals + 16, 2 * c);
+                vecHw.assign32(buf0, vals + 32, 2 * c);
 
                 vals += 64;
                 valsC += 64;
