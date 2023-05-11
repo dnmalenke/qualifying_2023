@@ -508,7 +508,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     std::vector<ec::Float> buffer(32);
 
-    while (true && c > 4)
+    while (c > 4)
     {
         c /= 2;
 
@@ -531,7 +531,8 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             {
                 if (c != 1 || reverse_bits(valsC) <= 512)
                 {
-                    buffer[k] = inputReal[vals + k] - inputReal[valsC + k];
+                    memcpy(buffer.data() + k, inputReal.data() + vals + k, sizeof(ec::Float));
+                    buffer[k] -= inputReal[valsC + k];
                 }
 
                 inputReal[vals + k] += inputReal[valsC + k];
@@ -549,7 +550,8 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
                 {
                     if (c != 1 || reverse_bits(valsC) <= 512)
                     {
-                        buffer[k] = inputImag[vals + k] - inputImag[valsC + k];
+                        memcpy(buffer.data() + k, inputImag.data() + vals + k, sizeof(ec::Float));
+                        buffer[k] -= inputImag[valsC + k];
                     }
 
                     if (k == 0 && j == 1)
@@ -609,41 +611,60 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
+    /*
+    Radix-4 fft
+    y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
+
+    y1 = (a+b*1i) - 1i*(c+d*1i) - (e+f*1i) + 1i*(g+h*1i);
+
+    y2= (a+b*1i) - (c+d*1i) + (e+f*1i) - (g+h*1i);
+
+    y3 = (a+b*1i) + 1i*(c+d*1i) - (e+f*1i) - 1i*(g+h*1i);
+
+    where a is real of x0, b is imag of x0, c is real of x1, d is imag of x1 ...
+    */
     for (size_t i = 0; i < 1024; i += 4)
     {
         memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
         memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
 
-        inputReal[i + 0] = buffer[0] + buffer[1] + buffer[2] + buffer[3];
+        inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3];
 
-        inputReal[i + 2] = buffer[0] - buffer[1] + buffer[2] - buffer[3];
+        inputReal[i + 2] += buffer[0] - buffer[1] - buffer[3];
 
         if (i == 0 || i == 4)
         {
             if (i != 0)
             {
-                inputReal[i + 1] = buffer[0] + buffer[5] - buffer[2] - buffer[7];
-                inputImag[i + 0] = buffer[5] + buffer[6] + buffer[7];
-                inputImag[i + 2] = buffer[6] - buffer[7] - buffer[5];
+                memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+                inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
+
+                memcpy(inputImag.data() + i, buffer.data() + 5, sizeof(ec::Float));
+                inputImag[i + 0] += buffer[6] + buffer[7];
             }
             else
             {
-                inputReal[i + 1] = buffer[0] - buffer[2];
+                memcpy(inputReal.data() + i + 1, buffer.data(),sizeof(ec::Float));
+                inputReal[i + 1] -= buffer[2];
             }
 
-            inputImag[i + 1] = buffer[3] - buffer[1] - buffer[6];
+            memcpy(inputImag.data() + i + 1, buffer.data() + 3,sizeof(ec::Float));
+            inputImag[i + 1] -= buffer[1] + buffer[6];
         }
         else
         {
-            inputReal[i + 1] = buffer[0] + buffer[5] - buffer[2] - buffer[7];
+            memcpy(inputReal.data() + i + 1, buffer.data(),sizeof(ec::Float));
+            inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
 
-            inputImag[i + 0] = buffer[4] + buffer[5] + buffer[6] + buffer[7];
-            inputImag[i + 1] = buffer[4] - buffer[1] - buffer[6] + buffer[3];
-            inputImag[i + 2] = buffer[4] - buffer[5] + buffer[6] - buffer[7];
+            inputImag[i + 0] += buffer[5] + buffer[6] + buffer[7];
+
+            memcpy(inputImag.data() + i + 1, buffer.data() + 4,sizeof(ec::Float));
+            inputImag[i + 1] -= buffer[1] + buffer[6] - buffer[3];
         }
     }
 
     ec::Float swapVal;
+
     for (size_t i = 0; i < WINDOW_SIZE; i++)
     {
         uint16_t newI = reverse_bits(i);
