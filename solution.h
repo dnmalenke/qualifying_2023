@@ -65,6 +65,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         fft(signalWindow, inImag, WINDOW_SIZE);
 
+
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
             ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i == 0 || i == 512 && j < 9) ? 0.0f : inImag[i] * inImag[i]);
@@ -507,7 +508,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     std::vector<ec::Float> buffer(32);
 
-    while (c > 1)
+    while (true && c > 4)
     {
         c /= 2;
 
@@ -608,9 +609,28 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
-    // fix order of arrays
+
+
+    for (size_t i = 0; i < 1024; i += 4)
+    {
+        memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
+        memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
+
+        inputReal[i + 0] = buffer[0] + buffer[1] + buffer[2] + buffer[3];
+        inputImag[i + 0] = buffer[4] + buffer[5] + buffer[6] + buffer[7];
+
+        inputReal[i + 1] = buffer[0] + buffer[5] - buffer[2] - buffer[7];
+        inputImag[i + 1] = buffer[4] - buffer[1] - buffer[6] + buffer[3];
+
+        inputReal[i + 2] = buffer[0] - buffer[1] + buffer[2] - buffer[3];
+        inputImag[i + 2] = buffer[4] - buffer[5] + buffer[6] - buffer[7];
+
+        inputReal[i + 3] = buffer[0] - buffer[5] - buffer[2] + buffer[7];
+        inputImag[i + 3] = buffer[4] + buffer[1] - buffer[6] - buffer[3];
+    }
+
     ec::Float swapVal;
-    for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
+    for (size_t i = 0; i < 1024; i++)
     {
         uint16_t newI = reverse_bits(i);
 
@@ -625,6 +645,24 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
             memcpy(inputImag.data() + newI, &swapVal, sizeof(ec::Float));
         }
     }
+
+    for (size_t i = 256; i < 512; i++)
+    {
+        uint16_t newI = 512 - (256 - i);
+
+        memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
+        memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
+        memcpy(inputReal.data() + newI, &swapVal, sizeof(ec::Float));
+
+        memcpy(&swapVal, inputImag.data() + i, sizeof(ec::Float));
+        memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
+        memcpy(inputImag.data() + newI, &swapVal, sizeof(ec::Float));
+    }
+
+    // for (size_t i = 0; i < 513; i++) 
+    // {
+    //     std::cout << i << " " << inputReal[i].toFloat() << std::endl;
+    // }
 }
 
 /*
