@@ -392,7 +392,7 @@ namespace ec
 
       for (size_t I = 0; I < num; I++)
       {
-        Measurement::inc(Measurement::MeasType::copy4B_VecHw);
+        Measurement::inc(Measurement::MeasType::copy4B_StreamHw);
         m_mem[idx_to + I] = data[idx_from + I].m_value;
       }
 

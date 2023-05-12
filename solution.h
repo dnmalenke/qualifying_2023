@@ -16,10 +16,17 @@
 
 #define SWEET_SPOT 8
 
+#define INIT(x) if(!streamInitted){x;}
+
+static bool streamInitted = false;
+
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
 static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
+static const ec::Float zero = 0.0f;
+static const ec::Float sqrt22 = (float)sqrt(2.0f) / 2.0f;
+static const ec::Float negSqrt22 = (float)(-1.0 * sqrt(2.0f) / 2.0f);
 
 static const ec::Float spC0((float)(10.0f / log(10.0f)));
 static const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -29,7 +36,8 @@ void init_blackmanCoefs();
 void init_angleTerms();
 uint16_t reverse_bits(uint16_t x);
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count);
+void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag);
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag);
 
 static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
 static std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
@@ -63,12 +71,12 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
-        fft(signalWindow, inImag, WINDOW_SIZE);
+        fft(signalWindow, inImag);
 
 
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i == 0 || i == 512 && j < 9) ? 0.0f : inImag[i] * inImag[i]);
+            ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i == 0 || i == 512 && j < numWins - 1) ? 0.0f : inImag[i] * inImag[i]);
 
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
@@ -99,45 +107,114 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, size_t count)
+void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 {
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    streamHw.resetMemTo0();
+
+    streamHw.createFifos(100);
 
     std::vector<ec::Float> temp(2 * WINDOW_SIZE);
 
-    size_t offset = 1004;
+    memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
+    memcpy(temp.data() + WINDOW_SIZE, blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
 
-    memcpy(temp.data(), inputReal.data(), offset * sizeof(ec::Float));
-    memcpy(temp.data() + offset, blackmanCoefs.data(), offset * sizeof(ec::Float));
+    streamHw.copyToHw(temp, 0, 2 * WINDOW_SIZE, 0);
 
-    vecHw.copyToHw(temp, 0, 2 * offset, 0);
+    // apply blackman coefficients
+    INIT(streamHw.addOpMulToPipeline(0, 1, 2));
+    streamHw.startStreamDataMemToFifo(0, 0, WINDOW_SIZE);
+    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 1, WINDOW_SIZE);
+    streamHw.startStreamDataFifoToMem(2, 0, WINDOW_SIZE);
 
-    vecHw.resetMemTo0(2 * offset, 20);
+    // apply blackman coefficients
+    INIT(streamHw.addOpMulToPipeline(20, 21, 22));
+    streamHw.startStreamDataMemToFifo(0, 20, WINDOW_SIZE);
+    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 21, WINDOW_SIZE);
+    streamHw.startStreamDataFifoToMem(22, 0, 2 * WINDOW_SIZE);
+
+    streamHw.runPipeline();
+
+    size_t c = WINDOW_SIZE / 2;
+
+    // run the 512 arrays
+
+    // [0 - C] = [0 - C] + [C - 2C]
+    INIT(streamHw.addOpAddToPipeline(3, 4, 5));
+    streamHw.startStreamDataMemToFifo(0, 3, c);
+    streamHw.startStreamDataMemToFifo(c, 4, c);
+    streamHw.startStreamDataFifoToMem(5, WINDOW_SIZE, c);
+
+    // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+    INIT(streamHw.addOpMulToPipeline(6, minusOne, 7)); // (-1)*inputReal[C - 2C]
+    INIT(streamHw.addOpAddToPipeline(7, 8, 9));
+
+    streamHw.startStreamDataMemToFifo(c, 6, c);
+    streamHw.startStreamDataMemToFifo(0, 8, c);
+    streamHw.startStreamDataFifoToMem(9, c, c);
+
+    streamHw.runPipeline();
+
+    INIT(streamHw.addOpAddToPipeline(10, zero, 11));
+
+    streamHw.startStreamDataMemToFifo(WINDOW_SIZE, 10, c);
+    streamHw.startStreamDataFifoToMem(11, 0, c);
+
+    streamHw.runPipeline();
+
+    streamHw.copyFromHw(inputReal, 0, WINDOW_SIZE, 0);
+
+
+    streamInitted = true;
+}
+
+void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
+{
+    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
+
+    sfft(inputReal, inputImag);
+
+    std::vector<ec::Float> temp(2 * WINDOW_SIZE);
+
+    // int offset = 1004;
+
+    memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
+    // memcpy(temp.data() + offset, blackmanCoefs.data(), offset * sizeof(ec::Float));
+
+    vecHw.copyToHw(temp, 0, WINDOW_SIZE, 0);
+
+    // vecHw.resetMemTo0(2 * offset, 20);
 
     // apply the blackman coefficients to input data
     // these are stored the location of the imaginary input data because we don't have any
-    for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
-    {
-        vecHw.mul32(32 * i, offset + 32 * i, 32 * i);
-    }
+    // for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
+    // {
+    //     vecHw.mul32(32 * i, offset + 32 * i, 32 * i);
+    // }
 
     int c = WINDOW_SIZE / 2;
 
     // c = 512 only working with reals for now
-    for (size_t i = 0; i < c / 32; i++)
-    {
-        // (-1)*inputReal[C - 2C]
-        vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
+    // for (size_t i = 0; i < c / 32; i++)
+    // {
+    //     // (-1)*inputReal[C - 2C]
+    //     vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
 
-        // [0 - C] = [0 - C] + [C - 2C]
-        vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
+    //     // [0 - C] = [0 - C] + [C - 2C]
+    //     vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
 
-        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-        vecHw.add32(REAL(0), IMAG(c), REAL(c));
+    //     // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+    //     vecHw.add32(REAL(0), IMAG(c), REAL(c));
 
-        // now we can assign it to [0 - C] because we're done reading it
-        vecHw.assign32(IMAG(0), REAL(0));
-    }
+    //     // now we can assign it to [0 - C] because we're done reading it
+    //     vecHw.assign32(IMAG(0), REAL(0));
+    // }
+
+    // for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // {
+    //     std::cout << i << " " << vecHw.m_mem[i] << std::endl;
+    // }
+
 
     vecHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // reset IMAG(0)
 
@@ -508,7 +585,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
 
     std::vector<ec::Float> buffer(32);
 
-    while (c > 4)
+    while (false && c > 4)
     {
         c /= 2;
 
@@ -612,77 +689,111 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
     }
 
 
-    // for (size_t i = 0; i < 1024; i += 8)
-    // {
-    //     memcpy(buffer.data(), inputReal.data() + i, 8 * sizeof(ec::Float));
-    //     memcpy(buffer.data() + 8, inputImag.data() + i, 8 * sizeof(ec::Float));
+#define X0R buffer[0]
+#define X1R buffer[1]
+#define X2R buffer[2]
+#define X3R buffer[3]
+#define X4R buffer[4]
+#define X5R buffer[5]
+#define X6R buffer[6]
+#define X7R buffer[7]
+#define X0I buffer[8]
+#define X1I buffer[9]
+#define X2I buffer[10]
+#define X3I buffer[11]
+#define X4I buffer[12]
+#define X5I buffer[13]
+#define X6I buffer[14]
+#define X7I buffer[15]
 
-    //     inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7];
-    //     inputImag[i + 0] += buffer[9] + buffer[10] + buffer[11] + buffer[12] + buffer[13] + buffer[14] + buffer[15];
-
-    //     /*
-    //     Y1 = X0 + w1*X1 + w2*X2 + w3*X3 + w4*X4 + w5*X5 + w6*X6 + w7*X7
-    //     Y2 = X0 + w2*X1 + w4*X2 + w6*X3 + X4 + w2*X5 + w4*X6 + w6*X7
-    //     Y3 = X0 + w3*X1 + w6*X2 + w1*X3 + w4*X4 + w7*X5 + w2*X6 + w5*X7
-    //     Y4 = X0 + w4*X1 + X2 + w4*X3 + X4 + w4*X5 + X6 + w4*X7
-    //     Y5 = X0 + w5*X1 + w2*X2 + w7*X3 + w4*X4 + w1*X5 + w6*X6 + w3*X7
-    //     Y6 = X0 + w6*X1 + w4*X2 + w2*X3 + X4 + w6*X5 + w4*X6 + w2*X7
-    //     Y7 = X0 + w7*X1 + w6*X2 + w5*X3 + w4*X4 + w3*X5 + w2*X6 + w1*X7
-    //     */
-
-    // }
-
-    /*
-    Radix-4 fft
-    y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
-
-    y1 = (a+b*1i) - 1i*(c+d*1i) - (e+f*1i) + 1i*(g+h*1i);
-
-    y2= (a+b*1i) - (c+d*1i) + (e+f*1i) - (g+h*1i);
-
-    y3 = (a+b*1i) + 1i*(c+d*1i) - (e+f*1i) - 1i*(g+h*1i);
-
-    where a is real of x0, b is imag of x0, c is real of x1, d is imag of x1 ...
-    */
-    for (size_t i = 0; i < 1024; i += 4)
+    for (size_t i = 0; i < 1024; i += 8)
     {
-        memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
-        memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
+        memcpy(buffer.data(), inputReal.data() + i, 8 * sizeof(ec::Float));
+        memcpy(buffer.data() + 8, inputImag.data() + i, 8 * sizeof(ec::Float));
 
-        inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3];
+        inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7];
+        inputImag[i + 0] += buffer[9] + buffer[10] + buffer[11] + buffer[12] + buffer[13] + buffer[14] + buffer[15];
 
-        inputReal[i + 2] += buffer[0] - buffer[1] - buffer[3];
+        /*
+        Y1 = X0 + w1*X1 + w2*X2 + w3*X3 + w4*X4 + w5*X5 + w6*X6 + w7*X7
+        Y2 = X0 + w2*X1 + w4*X2 + w6*X3 + X4 + w2*X5 + w4*X6 + w6*X7
+        Y3 = X0 + w3*X1 + w6*X2 + w1*X3 + w4*X4 + w7*X5 + w2*X6 + w5*X7
+        Y4 = X0 + w4*X1 + X2 + w4*X3 + X4 + w4*X5 + X6 + w4*X7
+        Y5 = X0 + w5*X1 + w2*X2 + w7*X3 + w4*X4 + w1*X5 + w6*X6 + w3*X7
+        Y6 = X0 + w6*X1 + w4*X2 + w2*X3 + X4 + w6*X5 + w4*X6 + w2*X7
+        Y7 = X0 + w7*X1 + w6*X2 + w5*X3 + w4*X4 + w3*X5 + w2*X6 + w1*X7
+        */
+        // (a + bi)*(c + di)
+        // (ac - bd) + i(ad + bc)
 
-        if (i == 0 || i == 4)
-        {
-            if (i != 0)
-            {
-                memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
-                inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
-
-                memcpy(inputImag.data() + i, buffer.data() + 5, sizeof(ec::Float));
-                inputImag[i + 0] += buffer[6] + buffer[7];
-            }
-            else
-            {
-                memcpy(inputReal.data() + i + 1, buffer.data(),sizeof(ec::Float));
-                inputReal[i + 1] -= buffer[2];
-            }
-
-            memcpy(inputImag.data() + i + 1, buffer.data() + 3,sizeof(ec::Float));
-            inputImag[i + 1] -= buffer[1] + buffer[6];
-        }
-        else
-        {
-            memcpy(inputReal.data() + i + 1, buffer.data(),sizeof(ec::Float));
-            inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
-
-            inputImag[i + 0] += buffer[5] + buffer[6] + buffer[7];
-
-            memcpy(inputImag.data() + i + 1, buffer.data() + 4,sizeof(ec::Float));
-            inputImag[i + 1] -= buffer[1] + buffer[6] - buffer[3];
-        }
+         // (c + di) = (sqrt22 + negSqrt22i)
+        inputReal[i + 1] = sqrt22 * X1I + X2I + sqrt22 * X3I - sqrt22 * X5I - X6I - sqrt22 * X7I + X0R + sqrt22 * X1R - sqrt22 * X3R - X4R - sqrt22 * X5R + sqrt22 * X7R;
+        inputImag[i + 1] = X0I + sqrt22 * X1I - sqrt22 * X3I - X4I - sqrt22 * X5I + sqrt22 * X7I - sqrt22 * X1R - X2R - sqrt22 * X3R + sqrt22 * X5R + X6R + sqrt22 * X7R;
+        inputReal[i + 2] = X1I - X3I + X5I - X7I + X0R - X2R + X4R - X6R;
+        inputImag[i + 2] = X0I - X2I + X4I - X6I - X1R + X3R - X5R + X7R;
+        inputReal[i + 3] = sqrt22 * X1I - X2I + sqrt22 * X3I - sqrt22 * X5I + X6I - sqrt22 * X7I + X0R - sqrt22 * X1R + sqrt22 * X3R - X4R + sqrt22 * X5R - sqrt22 * X7R;
+        inputImag[i + 3] = X0I - sqrt22 * X1I + sqrt22 * X3I - X4I + sqrt22 * X5I - sqrt22 * X7I - sqrt22 * X1R + X2R - sqrt22 * X3R + sqrt22 * X5R - X6R + sqrt22 * X7R;
+        inputReal[i + 4] = X0R - X1R + X2R - X3R + X4R - X5R + X6R - X7R;
+        inputImag[i + 4] = X0I - X1I + X2I - X3I + X4I - X5I + X6I - X7I;
+        inputReal[i + 5] = X2I - sqrt22 * X1I - sqrt22 * X3I + sqrt22 * X5I - X6I + sqrt22 * X7I + X0R - sqrt22 * X1R + sqrt22 * X3R - X4R + sqrt22 * X5R - sqrt22 * X7R;
+        inputImag[i + 5] = X0I - sqrt22 * X1I + sqrt22 * X3I - X4I + sqrt22 * X5I - sqrt22 * X7I + sqrt22 * X1R - X2R + sqrt22 * X3R - sqrt22 * X5R + X6R - sqrt22 * X7R;
+        inputReal[i + 6] = X3I - X1I - X5I + X7I + X0R - X2R + X4R - X6R;
+        inputImag[i + 6] = X0I - X2I + X4I - X6I + X1R - X3R + X5R - X7R;
+        inputReal[i + 7] = sqrt22 * X5I - X2I - sqrt22 * X3I - sqrt22 * X1I + X6I + sqrt22 * X7I + X0R + sqrt22 * X1R - sqrt22 * X3R - X4R - sqrt22 * X5R + sqrt22 * X7R;
+        inputImag[i + 7] = X0I + sqrt22 * X1I - sqrt22 * X3I - X4I - sqrt22 * X5I + sqrt22 * X7I + sqrt22 * X1R + X2R + sqrt22 * X3R - sqrt22 * X5R - X6R - sqrt22 * X7R;
     }
+
+    // /*
+    // Radix-4 fft
+    // y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
+
+    // y1 = (a+b*1i) - 1i*(c+d*1i) - (e+f*1i) + 1i*(g+h*1i);
+
+    // y2= (a+b*1i) - (c+d*1i) + (e+f*1i) - (g+h*1i);
+
+    // y3 = (a+b*1i) + 1i*(c+d*1i) - (e+f*1i) - 1i*(g+h*1i);
+
+    // where a is real of x0, b is imag of x0, c is real of x1, d is imag of x1 ...
+    // */
+    // for (size_t i = 0; i < 1024; i += 4)
+    // {
+    //     memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
+    //     memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
+
+    //     inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3];
+
+    //     inputReal[i + 2] += buffer[0] - buffer[1] - buffer[3];
+
+    //     if (i == 0 || i == 4)
+    //     {
+    //         if (i != 0)
+    //         {
+    //             memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+    //             inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
+
+    //             memcpy(inputImag.data() + i, buffer.data() + 5, sizeof(ec::Float));
+    //             inputImag[i + 0] += buffer[6] + buffer[7];
+    //         }
+    //         else
+    //         {
+    //             memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+    //             inputReal[i + 1] -= buffer[2];
+    //         }
+
+    //         memcpy(inputImag.data() + i + 1, buffer.data() + 3, sizeof(ec::Float));
+    //         inputImag[i + 1] -= buffer[1] + buffer[6];
+    //     }
+    //     else
+    //     {
+    //         memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+    //         inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
+
+    //         inputImag[i + 0] += buffer[5] + buffer[6] + buffer[7];
+
+    //         memcpy(inputImag.data() + i + 1, buffer.data() + 4, sizeof(ec::Float));
+    //         inputImag[i + 1] -= buffer[1] + buffer[6] - buffer[3];
+    //     }
+    // }
 
     ec::Float swapVal;
 
@@ -702,9 +813,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
-    for (size_t i = 256; i < 512; i++)
+    for (size_t i = 128; i < 256; i++)
     {
-        uint16_t newI = 512 - (256 - i);
+        uint16_t newI = 512 - (i-128);
 
         memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
         memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
@@ -714,6 +825,15 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         memcpy(inputImag.data() + i, inputImag.data() + newI, sizeof(ec::Float));
         memcpy(inputImag.data() + newI, &swapVal, sizeof(ec::Float));
     }
+
+    memcpy(inputReal.data() + 384, inputReal.data() + 640, sizeof(ec::Float));
+    memcpy(inputImag.data() + 384, inputImag.data() + 640, sizeof(ec::Float));
+
+    for (size_t i = 0; i < 1024; i++)
+    {
+        std::cout << i << " " << inputReal[i].toFloat() << std::endl;
+    }
+    
 }
 
 /*
