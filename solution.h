@@ -26,7 +26,6 @@ static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
 static const ec::Float zero = 0.0f;
 static const ec::Float sqrt22 = (float)sqrt(2.0f) / 2.0f;
-static const ec::Float negSqrt22 = (float)(-1.0 * sqrt(2.0f) / 2.0f);
 
 static const ec::Float spC0((float)(10.0f / log(10.0f)));
 static const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -51,7 +50,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     std::vector<ec::Float> signalWindow(WINDOW_SIZE);
 
-    std::vector<ec::Float> outputSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
+    std::vector<ec::Float> outputSpectrum(sizeSpectrum);
     std::vector<ec::Float> preLogSpectrum(sizeSpectrum, std::numeric_limits<float>::lowest());
 
     size_t idxStartWin = 0;
@@ -73,10 +72,20 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
         fft(signalWindow, inImag);
 
-
         for (size_t i = 0; i < sizeSpectrum; i++)
         {
-            ec::Float freqVal = signalWindow[i] * signalWindow[i] + ((i == 0 || i == 512 && j < numWins - 1) ? 0.0f : inImag[i] * inImag[i]);
+            ec::Float freqVal;
+
+            if ((i == 0 || i == 512 && j < numWins - 1))
+            {
+                ec::Float f = signalWindow[i] * signalWindow[i];
+                memcpy(&freqVal, &f, sizeof(ec::Float));
+            }
+            else
+            {
+                ec::Float f = signalWindow[i] * signalWindow[i] + inImag[i] * inImag[i];
+                memcpy(&freqVal, &f, sizeof(ec::Float));
+            }
 
             // we will always take the first window
             if (j != 0 && freqVal <= preLogSpectrum[i])
@@ -183,7 +192,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     vecHw.copyToHw(temp, 0, 2 * offset, 0);
 
-    vecHw.resetMemTo0(2 * offset, 20);
+    vecHw.resetMemTo0(2 * offset, WINDOW_SIZE - offset);
 
     // apply the blackman coefficients to input data
     // these are stored the location of the imaginary input data because we don't have any
@@ -294,16 +303,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             {
                 // addition stage:
                 // (-1)*[3C - 4C]
-                vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+                vecHw.mul32(valsC, minusOne, buf0, 32);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+                vecHw.add32(vals, buf0, buf1);
 
                 // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                vecHw.add32(vals, valsC, vals, std::min(c, 32));
+                vecHw.add32(vals, valsC, vals);
 
                 // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.assign32(buf1, valsC, std::min(c, 32));
+                vecHw.assign32(buf1, valsC);
 
                 // offset to imaginary numbers and do it again
                 vals += WINDOW_SIZE;
@@ -313,16 +322,16 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
                 {
                     // imaginaries
                     // (-1)*[3C - 4C]
-                    vecHw.mul32(valsC, minusOne, buf0, std::min(c, 32));
+                    vecHw.mul32(valsC, minusOne, buf0, 32);
 
                     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                    vecHw.add32(vals, buf0, buf1, std::min(c, 32));
+                    vecHw.add32(vals, buf0, buf1);
 
                     // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                    vecHw.add32(vals, valsC, vals, std::min(c, 32));
+                    vecHw.add32(vals, valsC, vals);
 
                     // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                    vecHw.assign32(buf1, valsC, std::min(c, 32));
+                    vecHw.assign32(buf1, valsC);
                 }
 
                 // remove the imaginary val offset and move on to the next pair
@@ -333,22 +342,22 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
                 valsC += 2 * c;
 
                 // complex multiplication stage:
-                vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0, std::min(c, 32)); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-                vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2, std::min(c, 32)); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+                vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+                vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
 
                 if (j != 0)
                 {
-                    vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1, std::min(c, 32)); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-                    vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC, std::min(c, 32)); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+                    vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
+                    vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
 
-                    vecHw.mul32(buf1, minusOne, buf1, std::min(c, 32)); // (-1)* (imag [C - 2C] *  sin(C-2C))
-                    vecHw.add32(buf0, buf1, realC, std::min(c, 32)); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-                    vecHw.add32(imagC, buf2, imagC, std::min(c, 32)); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+                    vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
+                    vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+                    vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
                 }
                 else
                 {
-                    vecHw.assign32(buf0, realC, std::min(c, 32));
-                    vecHw.assign32(buf2, imagC, std::min(c, 32));
+                    vecHw.assign32(buf0, realC);
+                    vecHw.assign32(buf2, imagC);
                 }
 
                 // repeat for 3C, 5C, and 7C
@@ -360,10 +369,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     // rearrage step
     size_t vals = 0;
-    size_t valsC = c;
+    size_t valsC = 32;
 
-    size_t realC = c;
-    size_t imagC = WINDOW_SIZE + c;
+    size_t realC = 32;
+    size_t imagC = WINDOW_SIZE + 32;
 
     c /= 2;
 
