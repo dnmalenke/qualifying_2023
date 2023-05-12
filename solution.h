@@ -172,49 +172,43 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 {
     ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
 
-    sfft(inputReal, inputImag);
+    // sfft(inputReal, inputImag);
 
     std::vector<ec::Float> temp(2 * WINDOW_SIZE);
 
-    // int offset = 1004;
+    int offset = 1004;
 
-    memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
-    // memcpy(temp.data() + offset, blackmanCoefs.data(), offset * sizeof(ec::Float));
+    memcpy(temp.data(), inputReal.data(), offset * sizeof(ec::Float));
+    memcpy(temp.data() + offset, blackmanCoefs.data(), offset * sizeof(ec::Float));
 
-    vecHw.copyToHw(temp, 0, WINDOW_SIZE, 0);
+    vecHw.copyToHw(temp, 0, 2 * offset, 0);
 
-    // vecHw.resetMemTo0(2 * offset, 20);
+    vecHw.resetMemTo0(2 * offset, 20);
 
     // apply the blackman coefficients to input data
     // these are stored the location of the imaginary input data because we don't have any
-    // for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
-    // {
-    //     vecHw.mul32(32 * i, offset + 32 * i, 32 * i);
-    // }
+    for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
+    {
+        vecHw.mul32(32 * i, offset + 32 * i, 32 * i);
+    }
 
     int c = WINDOW_SIZE / 2;
 
     // c = 512 only working with reals for now
-    // for (size_t i = 0; i < c / 32; i++)
-    // {
-    //     // (-1)*inputReal[C - 2C]
-    //     vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
+    for (size_t i = 0; i < c / 32; i++)
+    {
+        // (-1)*inputReal[C - 2C]
+        vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
 
-    //     // [0 - C] = [0 - C] + [C - 2C]
-    //     vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
+        // [0 - C] = [0 - C] + [C - 2C]
+        vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
 
-    //     // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-    //     vecHw.add32(REAL(0), IMAG(c), REAL(c));
+        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
+        vecHw.add32(REAL(0), IMAG(c), REAL(c));
 
-    //     // now we can assign it to [0 - C] because we're done reading it
-    //     vecHw.assign32(IMAG(0), REAL(0));
-    // }
-
-    // for (size_t i = 0; i < WINDOW_SIZE; i++)
-    // {
-    //     std::cout << i << " " << vecHw.m_mem[i] << std::endl;
-    // }
-
+        // now we can assign it to [0 - C] because we're done reading it
+        vecHw.assign32(IMAG(0), REAL(0));
+    }
 
     vecHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // reset IMAG(0)
 
@@ -585,110 +579,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     std::vector<ec::Float> buffer(32);
 
-    while (false && c > 4)
-    {
-        c /= 2;
-
-        size_t vals = 0;
-        size_t valsC = c;
-
-        // we need to run for real and imaginary
-        // [0 - C] = [0 - C] + [C - 2C]
-        // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-        // [2C - 3C] = [2C- 3C] + [3C - 4C]
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-
-        // [4C - 5C] = [4C - 5C] + [5C - 6C]
-        // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
-        // [6C - 7C] = [6C - 7C] + [7C - 8C]
-        // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
-        for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
-        {
-            for (size_t k = 0; k < c; k++)
-            {
-                if (c != 1 || reverse_bits(valsC) <= 512)
-                {
-                    memcpy(buffer.data() + k, inputReal.data() + vals + k, sizeof(ec::Float));
-                    buffer[k] -= inputReal[valsC + k];
-                }
-
-                inputReal[vals + k] += inputReal[valsC + k];
-            }
-
-            memcpy(inputReal.data() + valsC, buffer.data(), c * sizeof(ec::Float));
-
-            for (size_t k = 0; k < c; k++)
-            {
-                if (j == 0)
-                {
-                    memcpy(buffer.data() + k, inputImag.data() + vals + k, sizeof(ec::Float));
-                }
-                else
-                {
-                    if (c != 1 || reverse_bits(valsC) <= 512)
-                    {
-                        memcpy(buffer.data() + k, inputImag.data() + vals + k, sizeof(ec::Float));
-                        buffer[k] -= inputImag[valsC + k];
-                    }
-
-                    if (k == 0 && j == 1)
-                    {
-                        memcpy(inputImag.data() + vals + k, inputImag.data() + valsC + k, sizeof(ec::Float));
-                    }
-                    else
-                    {
-                        inputImag[vals + k] += inputImag[valsC + k];
-                    }
-                }
-            }
-
-            memcpy(inputImag.data() + valsC, buffer.data(), c * sizeof(ec::Float));
-
-            vals += 2 * c;
-            valsC += 2 * c;
-        }
-
-        if (c == 1)
-        {
-            break;
-        }
-
-        size_t realC = c;
-        size_t imagC = c;
-
-        // example of complex multiplication:
-        // (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
-        // So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
-        for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
-        {
-            for (size_t k = 0; k < c; k++)
-            {
-                if (k == 0)
-                {
-                    if (c != 1)
-                    {
-                        memcpy(buffer.data() + k, inputReal.data() + realC + k, sizeof(ec::Float));
-                    }
-                }
-                else
-                {
-                    buffer[k] = inputReal[realC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] - (inputImag[imagC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
-                    inputImag[imagC + k] = inputImag[imagC + k] * angleTerms[(WINDOW_SIZE - 2 * c) + k] + (inputReal[realC + k] * angleTerms[WINDOW_SIZE + (WINDOW_SIZE - 2 * c) + k]);
-                }
-            }
-
-            if (c != 1)
-            {
-                memcpy(inputReal.data() + realC, buffer.data(), c * sizeof(ec::Float));
-            }
-
-            // repeat for 3C, 5C, and 7C
-            realC += 2 * c;
-            imagC += 2 * c;
-        }
-    }
-
-
 #define X0R buffer[0]
 #define X1R buffer[1]
 #define X2R buffer[2]
@@ -706,94 +596,59 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 #define X6I buffer[14]
 #define X7I buffer[15]
 
+// Radix-8 fft
     for (size_t i = 0; i < 1024; i += 8)
     {
         memcpy(buffer.data(), inputReal.data() + i, 8 * sizeof(ec::Float));
         memcpy(buffer.data() + 8, inputImag.data() + i, 8 * sizeof(ec::Float));
 
-        inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7];
-        inputImag[i + 0] += buffer[9] + buffer[10] + buffer[11] + buffer[12] + buffer[13] + buffer[14] + buffer[15];
+        memcpy(inputReal.data() + i + 1, &X0R, sizeof(ec::Float));
+        memcpy(inputReal.data() + i + 2, &X0R, sizeof(ec::Float));
+        memcpy(inputReal.data() + i + 4, &X0R, sizeof(ec::Float));
+        memcpy(inputReal.data() + i + 5, &X0R, sizeof(ec::Float));
+        memcpy(inputReal.data() + i + 6, &X0R, sizeof(ec::Float));
 
-        /*
-        Y1 = X0 + w1*X1 + w2*X2 + w3*X3 + w4*X4 + w5*X5 + w6*X6 + w7*X7
-        Y2 = X0 + w2*X1 + w4*X2 + w6*X3 + X4 + w2*X5 + w4*X6 + w6*X7
-        Y3 = X0 + w3*X1 + w6*X2 + w1*X3 + w4*X4 + w7*X5 + w2*X6 + w5*X7
-        Y4 = X0 + w4*X1 + X2 + w4*X3 + X4 + w4*X5 + X6 + w4*X7
-        Y5 = X0 + w5*X1 + w2*X2 + w7*X3 + w4*X4 + w1*X5 + w6*X6 + w3*X7
-        Y6 = X0 + w6*X1 + w4*X2 + w2*X3 + X4 + w6*X5 + w4*X6 + w2*X7
-        Y7 = X0 + w7*X1 + w6*X2 + w5*X3 + w4*X4 + w3*X5 + w2*X6 + w1*X7
-        */
-        // (a + bi)*(c + di)
-        // (ac - bd) + i(ad + bc)
+        memcpy(inputImag.data() + i + 1, &X0I, sizeof(ec::Float));
+        memcpy(inputImag.data() + i + 2, &X0I, sizeof(ec::Float));
+        memcpy(inputImag.data() + i + 4, &X0I, sizeof(ec::Float));
+        memcpy(inputImag.data() + i + 5, &X0I, sizeof(ec::Float));
+        memcpy(inputImag.data() + i + 6, &X0I, sizeof(ec::Float));
 
-         // (c + di) = (sqrt22 + negSqrt22i)
-        inputReal[i + 1] = sqrt22 * X1I + X2I + sqrt22 * X3I - sqrt22 * X5I - X6I - sqrt22 * X7I + X0R + sqrt22 * X1R - sqrt22 * X3R - X4R - sqrt22 * X5R + sqrt22 * X7R;
-        inputImag[i + 1] = X0I + sqrt22 * X1I - sqrt22 * X3I - X4I - sqrt22 * X5I + sqrt22 * X7I - sqrt22 * X1R - X2R - sqrt22 * X3R + sqrt22 * X5R + X6R + sqrt22 * X7R;
-        inputReal[i + 2] = X1I - X3I + X5I - X7I + X0R - X2R + X4R - X6R;
-        inputImag[i + 2] = X0I - X2I + X4I - X6I - X1R + X3R - X5R + X7R;
-        inputReal[i + 3] = sqrt22 * X1I - X2I + sqrt22 * X3I - sqrt22 * X5I + X6I - sqrt22 * X7I + X0R - sqrt22 * X1R + sqrt22 * X3R - X4R + sqrt22 * X5R - sqrt22 * X7R;
-        inputImag[i + 3] = X0I - sqrt22 * X1I + sqrt22 * X3I - X4I + sqrt22 * X5I - sqrt22 * X7I - sqrt22 * X1R + X2R - sqrt22 * X3R + sqrt22 * X5R - X6R + sqrt22 * X7R;
-        inputReal[i + 4] = X0R - X1R + X2R - X3R + X4R - X5R + X6R - X7R;
-        inputImag[i + 4] = X0I - X1I + X2I - X3I + X4I - X5I + X6I - X7I;
-        inputReal[i + 5] = X2I - sqrt22 * X1I - sqrt22 * X3I + sqrt22 * X5I - X6I + sqrt22 * X7I + X0R - sqrt22 * X1R + sqrt22 * X3R - X4R + sqrt22 * X5R - sqrt22 * X7R;
-        inputImag[i + 5] = X0I - sqrt22 * X1I + sqrt22 * X3I - X4I + sqrt22 * X5I - sqrt22 * X7I + sqrt22 * X1R - X2R + sqrt22 * X3R - sqrt22 * X5R + X6R - sqrt22 * X7R;
-        inputReal[i + 6] = X3I - X1I - X5I + X7I + X0R - X2R + X4R - X6R;
-        inputImag[i + 6] = X0I - X2I + X4I - X6I + X1R - X3R + X5R - X7R;
-        inputReal[i + 7] = sqrt22 * X5I - X2I - sqrt22 * X3I - sqrt22 * X1I + X6I + sqrt22 * X7I + X0R + sqrt22 * X1R - sqrt22 * X3R - X4R - sqrt22 * X5R + sqrt22 * X7R;
-        inputImag[i + 7] = X0I + sqrt22 * X1I - sqrt22 * X3I - X4I - sqrt22 * X5I + sqrt22 * X7I + sqrt22 * X1R + X2R + sqrt22 * X3R - sqrt22 * X5R - X6R - sqrt22 * X7R;
+        if (i == 0)
+        {
+            inputReal[i + 0] += X1R + X2R + X3R + X4R + X5R + X6R + X7R;
+
+            inputReal[i + 1] += (X1R - X3R - X5R + X7R) * sqrt22 - X4R;
+            inputImag[i + 1] += (X5R - X3R - X1R + X7R) * sqrt22 + X6R - X2R;
+
+            inputReal[i + 2] += X4R - X2R - X6R;
+            inputImag[i + 2] += X3R - X1R - X5R + X7R;
+
+            inputReal[i + 4] += X2R - X1R - X3R + X4R - X5R + X6R - X7R;
+
+            inputReal[i + 5] += (X3R - X1R + X5R - X7R) * sqrt22 - X4R;
+            inputImag[i + 5] -= (X1R + X3R - X5R - X7R) * sqrt22 + X6R - X2R;
+
+            inputReal[i + 6] += X4R - X2R - X6R;
+            inputImag[i + 6] += X1R - X3R + X5R - X7R;
+        }
+        else
+        {
+            ec::Float c2 = X4I - X2I - X6I;
+
+            inputReal[i + 0] += X1R + X2R + X3R + X4R + X5R + X6R + X7R;
+            inputImag[i + 0] += X1I + X2I + X3I + X4I + X5I + X6I + X7I;
+
+            inputReal[i + 2] += X1I - X3I + X5I - X7I - X2R + X4R - X6R;
+            inputImag[i + 2] += c2 - X1R + X3R - X5R + X7R;
+
+            inputReal[i + 4] += X2R - X1R - X3R + X4R - X5R + X6R - X7R;
+            inputImag[i + 4] += X2I - X1I - X3I + X4I - X5I + X6I - X7I;
+
+            inputReal[i + 6] += X3I - X1I - X5I + X7I - X2R + X4R - X6R;
+            inputImag[i + 6] += c2 + X1R - X3R + X5R - X7R;
+        }
     }
-
-    // /*
-    // Radix-4 fft
-    // y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
-
-    // y1 = (a+b*1i) - 1i*(c+d*1i) - (e+f*1i) + 1i*(g+h*1i);
-
-    // y2= (a+b*1i) - (c+d*1i) + (e+f*1i) - (g+h*1i);
-
-    // y3 = (a+b*1i) + 1i*(c+d*1i) - (e+f*1i) - 1i*(g+h*1i);
-
-    // where a is real of x0, b is imag of x0, c is real of x1, d is imag of x1 ...
-    // */
-    // for (size_t i = 0; i < 1024; i += 4)
-    // {
-    //     memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
-    //     memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
-
-    //     inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3];
-
-    //     inputReal[i + 2] += buffer[0] - buffer[1] - buffer[3];
-
-    //     if (i == 0 || i == 4)
-    //     {
-    //         if (i != 0)
-    //         {
-    //             memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
-    //             inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
-
-    //             memcpy(inputImag.data() + i, buffer.data() + 5, sizeof(ec::Float));
-    //             inputImag[i + 0] += buffer[6] + buffer[7];
-    //         }
-    //         else
-    //         {
-    //             memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
-    //             inputReal[i + 1] -= buffer[2];
-    //         }
-
-    //         memcpy(inputImag.data() + i + 1, buffer.data() + 3, sizeof(ec::Float));
-    //         inputImag[i + 1] -= buffer[1] + buffer[6];
-    //     }
-    //     else
-    //     {
-    //         memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
-    //         inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
-
-    //         inputImag[i + 0] += buffer[5] + buffer[6] + buffer[7];
-
-    //         memcpy(inputImag.data() + i + 1, buffer.data() + 4, sizeof(ec::Float));
-    //         inputImag[i + 1] -= buffer[1] + buffer[6] - buffer[3];
-    //     }
-    // }
 
     ec::Float swapVal;
 
@@ -815,7 +670,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     for (size_t i = 128; i < 256; i++)
     {
-        uint16_t newI = 512 - (i-128);
+        uint16_t newI = 512 - (i - 128);
 
         memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
         memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
@@ -828,12 +683,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     memcpy(inputReal.data() + 384, inputReal.data() + 640, sizeof(ec::Float));
     memcpy(inputImag.data() + 384, inputImag.data() + 640, sizeof(ec::Float));
-
-    for (size_t i = 0; i < 1024; i++)
-    {
-        std::cout << i << " " << inputReal[i].toFloat() << std::endl;
-    }
-    
 }
 
 /*
