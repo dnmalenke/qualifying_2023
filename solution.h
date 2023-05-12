@@ -611,6 +611,27 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag, s
         }
     }
 
+
+    // for (size_t i = 0; i < 1024; i += 8)
+    // {
+    //     memcpy(buffer.data(), inputReal.data() + i, 8 * sizeof(ec::Float));
+    //     memcpy(buffer.data() + 8, inputImag.data() + i, 8 * sizeof(ec::Float));
+
+    //     inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7];
+    //     inputImag[i + 0] += buffer[9] + buffer[10] + buffer[11] + buffer[12] + buffer[13] + buffer[14] + buffer[15];
+
+    //     /*
+    //     Y1 = X0 + w1*X1 + w2*X2 + w3*X3 + w4*X4 + w5*X5 + w6*X6 + w7*X7
+    //     Y2 = X0 + w2*X1 + w4*X2 + w6*X3 + X4 + w2*X5 + w4*X6 + w6*X7
+    //     Y3 = X0 + w3*X1 + w6*X2 + w1*X3 + w4*X4 + w7*X5 + w2*X6 + w5*X7
+    //     Y4 = X0 + w4*X1 + X2 + w4*X3 + X4 + w4*X5 + X6 + w4*X7
+    //     Y5 = X0 + w5*X1 + w2*X2 + w7*X3 + w4*X4 + w1*X5 + w6*X6 + w3*X7
+    //     Y6 = X0 + w6*X1 + w4*X2 + w2*X3 + X4 + w6*X5 + w4*X6 + w2*X7
+    //     Y7 = X0 + w7*X1 + w6*X2 + w5*X3 + w4*X4 + w3*X5 + w2*X6 + w1*X7
+    //     */
+
+    // }
+
     /*
     Radix-4 fft
     y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
