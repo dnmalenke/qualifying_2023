@@ -225,6 +225,39 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     // now we can use first 512 slots in cos and sin as buffer
 
+    // we need to make the pipelines needed for our complex multiplication starting at offset 224
+    for (size_t i = 0; i < 8 * 4; i += 4)
+    {
+        // real * cos
+        INIT(streamHw.addOpMulToPipeline(224 + i, 224 + i + 1, 96 + i + 2));
+
+        // imag * sin * -1
+        INIT(streamHw.addOpMulToPipeline(224 + i + 2, 224 + i + 3, 96 + i + 1));
+    }
+    // real terms to 224 + i
+    // cos terms to 224 + i + 1
+    // imag terms 224 + i + 2
+    // sin terms 224 + i + 3
+    // output 96 + i + 3
+
+
+    for (size_t i = 0; i < 8 * 7; i += 7)
+    {
+        // real * sin
+        INIT(streamHw.addOpMulToPipeline(256 + i, 256 + i + 1, 256 + i + 2));
+
+        // imag * cos
+        INIT(streamHw.addOpMulToPipeline(256 + i + 3, 256 + i + 4, 256 + i + 5));
+
+        // add the two
+        INIT(streamHw.addOpAddToPipeline(256 + i + 2, 256 + i + 5, 256 + i + 6));
+    }
+    // real terms to 256 + i
+    // sin terms to 256 + i + 1
+    // imag terms 256 + i + 3
+    // cos terms 256 + i + 4
+    // output 256 + i + 6
+
     while (p > 32 && true)
     {
         p /= 2;
@@ -326,6 +359,8 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             }
             else
             {
+
+
 
             }
 
