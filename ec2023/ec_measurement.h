@@ -68,8 +68,8 @@ namespace ec
 
     Measurement();
     ~Measurement();
-    Measurement(const Measurement&) = delete;
-    Measurement& operator=(const Measurement&) = delete;
+    // Measurement(const Measurement&) = delete;
+    // Measurement& operator=(const Measurement&) = delete;
 
 
     static void inc(MeasType measType) noexcept;

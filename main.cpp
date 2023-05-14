@@ -19,7 +19,7 @@ int main()
 
             ec::Measurement scoreMeasurement;
 
-            maxSpectrum = process_signal(inputSignal);
+            maxSpectrum = process_signal(inputSignal, &scoreMeasurement);
         } // Scope of score measurement - end
 
         std::vector<ec::Float> refSpectrum = ec::SignalReader::readSignal("./reference_spectrum.txt");
