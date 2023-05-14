@@ -155,8 +155,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         streamHw.startStreamDataFifoToMem(i + 2, c * i / 3, c);
     }
 
-
-    MEASURE(streamHw.runPipeline(), "Blackman");
+    streamHw.runPipeline();
 
     // we now have 16 multiplication pipes
     // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ... 
@@ -176,7 +175,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     // created 16 addition pipes at offset 48
 
-    MEASURE(streamHw.runPipeline(), "First 512");
+    streamHw.runPipeline();
 
     for (size_t i = 0; i < 16 * 4; i += 4)
     {
@@ -187,7 +186,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         streamHw.startStreamDataFifoToMem(96 + i + 3, p + c * i / (4 * d), c / d);
     }
 
-    MEASURE(streamHw.runPipeline(), "second 512");
+    streamHw.runPipeline();
 
     // -1 then add pipes at offset 96
 
@@ -200,7 +199,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         streamHw.startStreamDataFifoToMem(160 + i + 1, c * i / (4 * d), c / (2 * d));
     }
 
-    MEASURE(streamHw.runPipeline(), "transfer");
+    streamHw.runPipeline();
 
     streamHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // clear out imaginary terms
 
@@ -212,7 +211,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         streamHw.startStreamDataFifoToMem(i + 2, WINDOW_SIZE + p + c * i / (3 * d), c / d);
     }
 
-    MEASURE(streamHw.runPipeline(), "512 sin terms");
+    streamHw.runPipeline();
 
     for (size_t i = 0; i < 16 * 3; i += 3)
     {
@@ -221,7 +220,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         streamHw.startStreamDataFifoToMem(i + 2, p + c * i / (3 * d), c / d);
     }
 
-    MEASURE(streamHw.runPipeline(), "512 cos terms");
+    streamHw.runPipeline();
 
     // now we can use first 512 slots in cos and sin as buffer
 
@@ -232,7 +231,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         INIT(streamHw.addOpMulToPipeline(224 + i, 224 + i + 1, 96 + i + 2));
 
         // imag * sin * -1
-        INIT(streamHw.addOpMulToPipeline(224 + i + 2, 224 + i + 3, 96 + i + 1));
+        INIT(streamHw.addOpMulToPipeline(224 + i + 2, 224 + i + 3, 96 + i));
     }
     // real terms to 224 + i
     // cos terms to 224 + i + 1
@@ -258,10 +257,12 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     // cos terms 256 + i + 4
     // output 256 + i + 6
 
+
     while (p > 32 && true)
     {
         p /= 2;
         d *= 2;
+        // std::cout << "d: " << d << std::endl;
 
         size_t vals = 0;
         size_t valsC = p;
@@ -342,7 +343,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
                 for (size_t i = 0; i < 16 * 3; i += 3)
                 {
                     streamHw.startStreamDataMemToFifo(realC + c * i / (3 * d), i, c / d);
-                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + c * i / (3 * d), i + 1, c / d);
+                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (3 * d), i + 1, c / d);
                     streamHw.startStreamDataFifoToMem(i + 2, imagC + c * i / (3 * d), c / d);
                 }
 
@@ -351,7 +352,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
                 for (size_t i = 0; i < 16 * 3; i += 3)
                 {
                     streamHw.startStreamDataMemToFifo(realC + c * i / (3 * d), i, c / d);
-                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (3 * d), i + 1, c / d);
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (3 * d), i + 1, c / d);
                     streamHw.startStreamDataFifoToMem(i + 2, realC + c * i / (3 * d), c / d);
                 }
 
@@ -359,30 +360,66 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             }
             else
             {
+                // std::cout << "dd: " << 2 * c / d << std::endl;
+                for (size_t i = 0; i < 8 * 4; i += 4)
+                {
+                    streamHw.startStreamDataMemToFifo(realC + c * i / (4 * (d / 2)), 224 + i, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (4 * (d / 2)), 224 + i + 1, 2 * c / d);
+
+                    // imag * sin * -1
+                    streamHw.startStreamDataMemToFifo(imagC + c * i / (4 * (d / 2)), 224 + i + 2, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (4 * (d / 2)), 224 + i + 3, 2 * c / d);
+
+                    streamHw.startStreamDataFifoToMem(96 + i + 3, 2 * WINDOW_SIZE + c * i / (4 * (d / 2)), 2 * c / d);
+                }
+                // real terms to 224 + i
+                // cos terms to 224 + i + 1
+                // imag terms 224 + i + 2
+                // sin terms 224 + i + 3
+                // output 96 + i + 3
+
+                streamHw.runPipeline();
 
 
+                for (size_t i = 0; i < 8 * 7; i += 7)
+                {
+                    // real * sin
 
+                    streamHw.startStreamDataMemToFifo(realC + c * i / (7 * (d / 2)), 256 + i, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (7 * (d / 2)), 256 + i + 1, 2 * c / d);
+
+                    // imag * cos
+
+                    streamHw.startStreamDataMemToFifo(imagC + c * i / (7 * (d / 2)), 256 + i + 3, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (7 * (d / 2)), 256 + i + 4, 2 * c / d);
+
+                    // add the two
+
+                    streamHw.startStreamDataFifoToMem(256 + i + 6, imagC + c * i / (7 * (d / 2)), 2 * c / d);
+                }
+                // real terms to 256 + i
+                // sin terms to 256 + i + 1
+                // imag terms 256 + i + 3
+                // cos terms 256 + i + 4
+                // output 256 + i + 6
+
+                streamHw.runPipeline();
+
+
+                for (size_t i = 0; i < 32 * 2; i += 2)
+                {
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                    streamHw.startStreamDataFifoToMem(160 + i + 1, realC + c * i / (4 * d), c / (2 * d));
+                }
+
+                streamHw.runPipeline();
             }
 
-            // complex multiplication stage:
-            vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-            vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
-
-            vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-            vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
-
-            vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
-            vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-            vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
-
             // repeat for 3C, 5C, and 7C
-            realC += 2 * c;
-            imagC += 2 * c;
+            realC += 2 * p;
+            imagC += 2 * p;
         }
     }
-
-
-
 
     streamHw.copyFromHw(temp, 0, 2 * WINDOW_SIZE, 0);
 
@@ -406,51 +443,6 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
     vecHw.copyToHw(temp, 0, 2 * WINDOW_SIZE, 0);
 
-    // vecHw.resetMemTo0(2 * offset, WINDOW_SIZE - offset);
-
-    // apply the blackman coefficients to input data
-    // these are stored the location of the imaginary input data because we don't have any
-    // for (size_t i = 0; i < WINDOW_SIZE / 32; i++)
-    // {
-    //     vecHw.mul32(32 * i, offset + 32 * i, 32 * i);
-    // }
-
-    int c = WINDOW_SIZE / 2;
-    {
-        // c = 512 only working with reals for now
-        // for (size_t i = 0; i < c / 32; i++)
-        // {
-        //     // (-1)*inputReal[C - 2C]
-        //     vecHw.mul32(REAL(c), minusOne, IMAG(c), 32); // stick this in imag[C - 2C] for now. it will be fixed later
-
-        //     // [0 - C] = [0 - C] + [C - 2C]
-        //     vecHw.add32(REAL(0), REAL(c), IMAG(0)); // store in imag[0] for now.
-
-        //     // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-        //     vecHw.add32(REAL(0), IMAG(c), REAL(c));
-
-        //     // now we can assign it to [0 - C] because we're done reading it
-        //     vecHw.assign32(IMAG(0), REAL(0));
-        // }
-
-        // vecHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // reset IMAG(0)
-
-
-
-
-        /*
-        input[C - 2C] * omega[0 through C] # this is complex multiplication
-        example of complex multiplication:
-        (x + yj) * (a + bj) = (xa - yb) + (xb + ya)j
-        So the real part of the product is (xa - yb), and the imaginary part of the product is (xb + ya).
-       */
-       // for (size_t i = 0; i < c / 32; i++)
-       // {
-       //     vecHw.mul32(REAL(c), 3 * WINDOW_SIZE + 32 * i, IMAG(c)); // imag [C - 2C] = real[C - 2C] * sin(0 - C)        
-       //     vecHw.mul32(REAL(c), 2 * WINDOW_SIZE + 32 * i, REAL(c)); // real [C - 2C] = real [C - 2C] * cos(0 - C)
-       // }
-
-    }
 
     // Note we have now used the first 512 values in 2 * WINDOW_SIZE and 3 * WINDOW_SIZE and will no longer need them.
     size_t buf0 = 2 * WINDOW_SIZE;
@@ -459,139 +451,7 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     size_t buf3 = 2 * WINDOW_SIZE + 96;
     size_t buf4 = 2 * WINDOW_SIZE + 128;
 
-    while (c > 32 && false) // sweet spot
-    {
-        c /= 2;
-
-        // when the arrays we are working with are larger than 32, our operations need to be chunked out into chunks of 32
-        // the variable i tracks which chunk we are currently in
-        for (size_t i = 0; i < std::max(1, c / 32); i++)
-        {
-            size_t vals = REAL(0);
-            size_t valsC = REAL(c);
-
-            size_t realC = REAL(c);
-            size_t imagC = IMAG(c);
-
-            // we need to run for real and imaginary
-            // [0 - C] = [0 - C] + [C - 2C]
-            // [C - 2C] = [0 - C] + (-1)*[C - 2C]
-            // [2C - 3C] = [2C- 3C] + [3C - 4C]
-            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-
-            // [4C - 5C] = [4C - 5C] + [5C - 6C]
-            // [5C - 6C] = [4C - 5C] + (-1)*[5C - 6C]
-            // [6C - 7C] = [6C - 7C] + [7C - 8C]
-            // [7C - 8C] = [6C - 7C] + (-1)*[7C - 8C]
-
-            // this is the pair loop
-            // it will repeat for each pair of matricies that need to be processed
-            // here c = 128, so 4 pairs of cross addition and complex multiplication needs to happen
-            /*
-            | -- cross addition -- | | complex multiplication |
-
-            j = 0
-
-            j * c   ----\--/---- : vals
-                         \/
-                         /\
-            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
-
-            j++
-
-            j * c   ----\--/---- : vals
-                         \/
-                         /\
-            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
-
-            j++
-
-            j * c   ----\--/---- : vals
-                         \/
-                         /\
-            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
-
-            j++
-
-            j * c   ----\--/---- : vals
-                         \/
-                         /\
-            (j+1)*c ----/--\---- : valsC -> realC * omega[WINDOW_SIZE - 2 * c]
-            */
-            for (size_t j = 0; j < WINDOW_SIZE / (2 * c); j++)
-            {
-                // addition stage:
-                // (-1)*[3C - 4C]
-                vecHw.mul32(valsC, minusOne, buf0, 32);
-
-                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.add32(vals, buf0, buf1);
-
-                // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                vecHw.add32(vals, valsC, vals);
-
-                // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                vecHw.assign32(buf1, valsC);
-
-                // offset to imaginary numbers and do it again
-                vals += WINDOW_SIZE;
-                valsC += WINDOW_SIZE;
-
-                if (j != 0) // manually exclude times where imaginary numbers aren't populated
-                {
-                    // imaginaries
-                    // (-1)*[3C - 4C]
-                    vecHw.mul32(valsC, minusOne, buf0, 32);
-
-                    // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                    vecHw.add32(vals, buf0, buf1);
-
-                    // [2C - 3C] = [2C - 3C] + [3C - 4C]
-                    vecHw.add32(vals, valsC, vals);
-
-                    // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-                    vecHw.assign32(buf1, valsC);
-                }
-
-                // remove the imaginary val offset and move on to the next pair
-                vals -= WINDOW_SIZE;
-                vals += 2 * c;
-
-                valsC -= WINDOW_SIZE;
-                valsC += 2 * c;
-
-                // complex multiplication stage:
-                vecHw.mul32(realC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-                vecHw.mul32(realC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
-
-                if (j != 0)
-                {
-                    vecHw.mul32(imagC, 3 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-                    vecHw.mul32(imagC, 2 * WINDOW_SIZE + 32 * i + (WINDOW_SIZE - 2 * c), imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
-
-                    vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
-                    vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-                    vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
-                }
-                else
-                {
-                    vecHw.assign32(buf0, realC);
-                    vecHw.assign32(buf2, imagC);
-                }
-
-                // repeat for 3C, 5C, and 7C
-                realC += 2 * c;
-                imagC += 2 * c;
-            }
-        }
-    }
-
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
-    {
-        std::cout << i << " " << vecHw.m_mem[i] << std::endl;
-    }
-    return;
-    // c = 32;
+    size_t c = 32;
 
     // rearrage step
     size_t vals = 0;
@@ -600,91 +460,100 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     size_t realC = 32;
     size_t imagC = WINDOW_SIZE + 32;
 
-    c /= 2;
-
-    //todo do this while generating the angle terms
-    vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3, c);
-    vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3 + c, c);
-    vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4, c);
-    vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4 + c, c);
-
-    // for every other pair of 32 sized arrays
-    // we need to rearrange their layout            
-    // todo see if i can readd the j != 0 stuff again
-    for (size_t j = 0; j < WINDOW_SIZE / (2 * 32); j++)
+    if (true)
     {
-        // take the last 16 values from the first array and swap them with the first 16 values from the second array
-        vecHw.assign32(vals + c, buf0, c);
-        vecHw.assign32(valsC, vals + c, c);
-        vecHw.assign32(buf0, valsC, c);
+        c /= 2;
 
-        // now we can run the next set of addition but in 32 value chunks
-        vecHw.mul32(valsC, minusOne, buf0, 32); // we need to specify the 32 here because of a reassignment oversight in measurement
+        //todo do this while generating the angle terms
+        vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3, c);
+        vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3 + c, c);
+        vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4, c);
+        vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4 + c, c);
 
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-        vecHw.add32(vals, buf0, buf1);
+        // for every other pair of 32 sized arrays
+        // we need to rearrange their layout            
+        // todo see if i can readd the j != 0 stuff again
+        for (size_t j = 0; j < WINDOW_SIZE / (2 * 32); j++)
+        {
+            // take the last 16 values from the first array and swap them with the first 16 values from the second array
+            vecHw.assign32(vals + c, buf0, c);
+            vecHw.assign32(valsC, vals + c, c);
+            vecHw.assign32(buf0, valsC, c);
 
-        // [2C - 3C] = [2C - 3C] + [3C - 4C]
-        vecHw.add32(vals, valsC, vals);
+            // now we can run the next set of addition but in 32 value chunks
+            vecHw.mul32(valsC, minusOne, buf0, 32); // we need to specify the 32 here because of a reassignment oversight in measurement
 
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-        vecHw.assign32(buf1, valsC);
+            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+            vecHw.add32(vals, buf0, buf1);
 
-        // offset to imaginary numbers and do it again
-        vals += WINDOW_SIZE;
-        valsC += WINDOW_SIZE;
+            // [2C - 3C] = [2C - 3C] + [3C - 4C]
+            vecHw.add32(vals, valsC, vals);
 
-        // take the last 16 values from the first array and swap them with the first 16 values from the second array
-        vecHw.assign32(vals + c, buf0, c);
-        vecHw.assign32(valsC, vals + c, c);
-        vecHw.assign32(buf0, valsC, c);
+            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+            vecHw.assign32(buf1, valsC);
 
-        // imaginaries
-        // (-1)*[3C - 4C]
-        vecHw.mul32(valsC, minusOne, buf0, 32);
+            // offset to imaginary numbers and do it again
+            vals += WINDOW_SIZE;
+            valsC += WINDOW_SIZE;
 
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-        vecHw.add32(vals, buf0, buf1);
+            // take the last 16 values from the first array and swap them with the first 16 values from the second array
+            vecHw.assign32(vals + c, buf0, c);
+            vecHw.assign32(valsC, vals + c, c);
+            vecHw.assign32(buf0, valsC, c);
 
-        // [2C - 3C] = [2C - 3C] + [3C - 4C]
-        vecHw.add32(vals, valsC, vals);
+            // imaginaries
+            // (-1)*[3C - 4C]
+            vecHw.mul32(valsC, minusOne, buf0, 32);
 
-        // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-        vecHw.assign32(buf1, valsC);
+            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+            vecHw.add32(vals, buf0, buf1);
 
-        // complex multiplication stage:
-        vecHw.mul32(realC, buf3, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
+            // [2C - 3C] = [2C - 3C] + [3C - 4C]
+            vecHw.add32(vals, valsC, vals);
 
-        vecHw.mul32(imagC, buf4, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-        vecHw.mul32(imagC, buf3, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
+            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
+            vecHw.assign32(buf1, valsC);
 
-        vecHw.mul32(realC, buf4, buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
+            // complex multiplication stage:
+            vecHw.mul32(realC, buf3, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
 
-        vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
-        vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-        vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
+            vecHw.mul32(imagC, buf4, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
+            vecHw.mul32(imagC, buf3, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
 
-        // repeat for 3C, 5C, and 7C
-        realC += 64;
-        imagC += 64;
+            vecHw.mul32(realC, buf4, buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
 
-        // take the last 16 values from the first array and swap them with the first 16 values from the second array
-        vecHw.assign32(vals + c, buf0, c);
-        vecHw.assign32(valsC, vals + c, c);
-        vecHw.assign32(buf0, valsC, c);
+            vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
+            vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
+            vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
 
-        // remove the imaginary val offset and move on to the next pair
-        vals -= WINDOW_SIZE;
-        valsC -= WINDOW_SIZE;
+            // repeat for 3C, 5C, and 7C
+            realC += 64;
+            imagC += 64;
 
-        // take the last 16 values from the first array and swap them with the first 16 values from the second array
-        vecHw.assign32(vals + c, buf0, c);
-        vecHw.assign32(valsC, vals + c, c);
-        vecHw.assign32(buf0, valsC, c);
+            // take the last 16 values from the first array and swap them with the first 16 values from the second array
+            vecHw.assign32(vals + c, buf0, c);
+            vecHw.assign32(valsC, vals + c, c);
+            vecHw.assign32(buf0, valsC, c);
 
-        vals += 64;
-        valsC += 64;
+            // remove the imaginary val offset and move on to the next pair
+            vals -= WINDOW_SIZE;
+            valsC -= WINDOW_SIZE;
+
+            // take the last 16 values from the first array and swap them with the first 16 values from the second array
+            vecHw.assign32(vals + c, buf0, c);
+            vecHw.assign32(valsC, vals + c, c);
+            vecHw.assign32(buf0, valsC, c);
+
+            vals += 64;
+            valsC += 64;
+        }
     }
+
+    // for (size_t i = 0; i < 1 * WINDOW_SIZE; i++)
+    // {
+    //     std::cout << i << " " << vecHw.m_mem[i] << std::endl;
+    // }
+
 
     c = 8;
 
