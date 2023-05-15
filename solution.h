@@ -66,7 +66,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
         // puts cosine terms back into streamHw. we were using that space for buffering
-        streamHw.copyToHw(angleTerms, 0, 512, 2 * WINDOW_SIZE);
+        streamHw.copyToHw(angleTerms, 0, 256, 2 * WINDOW_SIZE);
 
         std::vector<ec::Float> inImag(WINDOW_SIZE);
 
@@ -119,9 +119,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 {
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-    // streamHw.resetMemTo0();
 
-    streamHw.createFifos(1000);
+    INIT(streamHw.createFifos(1000));
 
     std::vector<ec::Float> temp(2 * WINDOW_SIZE);
 
@@ -243,8 +242,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     // cos terms 256 + i + 4
     // output 256 + i + 6
 
-
-    while (p > 32 && true)
+    while (p > 32)
     {
         p /= 2;
         d *= 2;
@@ -405,226 +403,25 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         }
     }
 
-    p /= 2;
+    size_t x = 1;
 
-    size_t vals = 0;
-    size_t valsC = p;
-    size_t realC = p;
-    size_t imagC = WINDOW_SIZE + p;
-
-    // radix 32
+    while (p > 4)
     {
-        for (size_t j = 0; j < WINDOW_SIZE / (2 * p); j += 2)
+        p /= 2;
+        x *= 2;
+
+        size_t vals = 0;
+        size_t  valsC = p;
+
+        size_t realC = p;
+        size_t imagC = WINDOW_SIZE + p;
+
+        // radix 16
+        for (size_t j = 0; j < WINDOW_SIZE / (2 * p); j += x)
         {
             for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
             {
-                if (i == 24)
-                {
-                    vOff = 2 * p;
-                    iOff = 24;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (3 * d);
-
-                streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
-                streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
-                streamHw.startStreamDataFifoToMem(48 + i + 2, 2 * WINDOW_SIZE + c * i / (3 * d), c / d);
-            }
-
-            streamHw.runPipeline();
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
-            {
-                if (i == 32)
-                {
-                    vOff = 2 * p;
-                    iOff = 32;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-                streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
-                streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
-                streamHw.startStreamDataFifoToMem(96 + i + 3, valsC + sIdx, c / d);
-            }
-
-            streamHw.runPipeline();
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
-            {
-                if (i == 32)
-                {
-                    vOff = 2 * p;
-                    iOff = 32;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-                streamHw.startStreamDataFifoToMem(160 + i + 1, vals + sIdx, c / (2 * d));
-            }
-
-            streamHw.runPipeline();
-
-            // offset to imaginary numbers and do it again
-            vals += WINDOW_SIZE;
-            valsC += WINDOW_SIZE;
-
-
-            // imaginaries
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
-            {
-                if (i == 24)
-                {
-                    vOff = 2 * p;
-                    iOff = 24;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (3 * d);
-
-                streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
-                streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
-                streamHw.startStreamDataFifoToMem(48 + i + 2, 2 * WINDOW_SIZE + c * i / (3 * d), c / d);
-            }
-
-            streamHw.runPipeline();
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
-            {
-                if (i == 32)
-                {
-                    vOff = 2 * p;
-                    iOff = 32;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-                streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
-                streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
-                streamHw.startStreamDataFifoToMem(96 + i + 3, valsC + sIdx, c / d);
-            }
-
-            streamHw.runPipeline();
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
-            {
-                if (i == 32)
-                {
-                    vOff = 2 * p;
-                    iOff = 32;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-                streamHw.startStreamDataFifoToMem(160 + i + 1, vals + sIdx, c / (2 * d));
-            }
-
-            streamHw.runPipeline();
-
-            // remove the imaginary val offset and move on to the next pair
-            vals -= WINDOW_SIZE;
-            vals += 4 * p;
-
-            valsC -= WINDOW_SIZE;
-            valsC += 4 * p;
-
-
-            // complex multiplication
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 4; i += 4)
-            {
-                if (i == 16)
-                {
-                    vOff = 2 * p;
-                    iOff = 16;
-                }
-
-                size_t sIdx = c * (i - iOff) / (4 * (d / 2));
-
-                streamHw.startStreamDataMemToFifo(vOff + realC + sIdx, 224 + i, 2 * c / d);
-                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 224 + i + 1, 2 * c / d);
-
-                // imag * sin * -1
-                streamHw.startStreamDataMemToFifo(vOff + imagC + sIdx, 224 + i + 2, 2 * c / d);
-                streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 224 + i + 3, 2 * c / d);
-                streamHw.startStreamDataFifoToMem(96 + i + 3, 2 * WINDOW_SIZE + c * i / (4 * (d / 2)), 2 * c / d);
-            }
-            // real terms to 224 + i
-            // cos terms to 224 + i + 1
-            // imag terms 224 + i + 2
-            // sin terms 224 + i + 3
-            // output 96 + i + 3
-
-            streamHw.runPipeline();
-
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 7; i += 7)
-            {
-                if (i == 28)
-                {
-                    vOff = 2 * p;
-                    iOff = 28;
-                }
-
-                size_t sIdx = c * (i - iOff) / (7 * (d / 2));
-
-
-                streamHw.startStreamDataMemToFifo(vOff + realC + sIdx, 256 + i, 2 * c / d);
-                streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 256 + i + 1, 2 * c / d);
-
-                streamHw.startStreamDataMemToFifo(vOff + imagC + sIdx, 256 + i + 3, 2 * c / d);
-                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 256 + i + 4, 2 * c / d);
-
-                streamHw.startStreamDataFifoToMem(256 + i + 6, vOff + imagC + sIdx, 2 * c / d);
-            }
-            // real terms to 256 + i
-            // sin terms to 256 + i + 1
-            // imag terms 256 + i + 3
-            // cos terms 256 + i + 4
-            // output 256 + i + 6
-
-            streamHw.runPipeline();
-
-
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
-            {
-                if (i == 32)
-                {
-                    vOff = 2 * p;
-                    iOff = 32;
-                }
-
-                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-                streamHw.startStreamDataFifoToMem(160 + i + 1, realC + sIdx, c / (2 * d));
-            }
-
-            streamHw.runPipeline();
-
-            // repeat for 3C, 5C, and 7C
-            realC += 4 * p;
-            imagC += 4 * p;
-        }
-    }
-
-
-    p /= 2;
-
-    vals = 0;
-    valsC = p;
-
-    realC = p;
-    imagC = WINDOW_SIZE + p;
-
-    // radix 16
-    if (true)
-    {
-        for (size_t j = 0; j < WINDOW_SIZE / (2 * p); j += 4)
-        {
-            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
-            {
-                if (i != 0 && i % 12 == 0)
+                if (i != 0 && i % (16 * 3 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -641,7 +438,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
             {
-                if (i != 0 && i % 16 == 0)
+                if (i != 0 && i % (16 * 4 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -658,7 +455,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
             {
-                if (i != 0 && i % 16 == 0)
+                if (i != 0 && i % (32 * 2 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -680,7 +477,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             // imaginaries
             for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
             {
-                if (i != 0 && i % 12 == 0)
+                if (i != 0 && i % (16 * 3 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -697,7 +494,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
             {
-                if (i != 0 && i % 16 == 0)
+                if (i != 0 && i % (16 * 4 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -714,7 +511,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
             {
-                if (i != 0 && i % 16 == 0)
+                if (i != 0 && i % (32 * 2 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -739,7 +536,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             // complex multiplication
             for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 4; i += 4)
             {
-                if (i != 0 && i % 8 == 0)
+                if (i != 0 && i % (8 * 4 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -766,7 +563,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 7; i += 7)
             {
-                if (i != 0 && i % 14 == 0)
+                if (i != 0 && i % (8 * 7 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -793,7 +590,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
             for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
             {
-                if (i != 0 && i % 16 == 0)
+                if (i != 0 && i % (32 * 2 / x) == 0)
                 {
                     vOff += 2 * p;
                     iOff = i;
@@ -824,89 +621,59 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 
 void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
 {
-    ec::VecHw& vecHw = *ec::VecHw::getSingletonVecHw();
-
     sfft(inputReal, inputImag);
 
     std::vector<ec::Float> buffer(32);
 
-#define X0R buffer[0]
-#define X1R buffer[1]
-#define X2R buffer[2]
-#define X3R buffer[3]
-#define X4R buffer[4]
-#define X5R buffer[5]
-#define X6R buffer[6]
-#define X7R buffer[7]
-#define X0I buffer[8]
-#define X1I buffer[9]
-#define X2I buffer[10]
-#define X3I buffer[11]
-#define X4I buffer[12]
-#define X5I buffer[13]
-#define X6I buffer[14]
-#define X7I buffer[15]
+    /*
+        Radix-4 fft
+        y0 = (a+b*1i) + (c+d*1i) + (e+f*1i) + (g+h*1i);
 
-    // Radix-8 fft
-    for (size_t i = 0; i < 1024; i += 8)
+        y1 = (a+b*1i) - 1i*(c+d*1i) - (e+f*1i) + 1i*(g+h*1i);
+
+        y2= (a+b*1i) - (c+d*1i) + (e+f*1i) - (g+h*1i);
+
+        y3 = (a+b*1i) + 1i*(c+d*1i) - (e+f*1i) - 1i*(g+h*1i);
+
+        where a is real of x0, b is imag of x0, c is real of x1, d is imag of x1 ...
+        */
+    for (size_t i = 0; i < WINDOW_SIZE; i += 4)
     {
-        memcpy(buffer.data(), inputReal.data() + i, 8 * sizeof(ec::Float));
-        memcpy(buffer.data() + 8, inputImag.data() + i, 8 * sizeof(ec::Float));
+        memcpy(buffer.data(), inputReal.data() + i, 4 * sizeof(ec::Float));
+        memcpy(buffer.data() + 4, inputImag.data() + i, 4 * sizeof(ec::Float));
 
-        memcpy(inputReal.data() + i + 1, &X0R, sizeof(ec::Float));
-        memcpy(inputReal.data() + i + 2, &X0R, sizeof(ec::Float));
-        memcpy(inputReal.data() + i + 4, &X0R, sizeof(ec::Float));
-        memcpy(inputReal.data() + i + 5, &X0R, sizeof(ec::Float));
-        memcpy(inputReal.data() + i + 6, &X0R, sizeof(ec::Float));
+        inputReal[i + 0] += buffer[1] + buffer[2] + buffer[3];
 
-        memcpy(inputImag.data() + i + 1, &X0I, sizeof(ec::Float));
-        memcpy(inputImag.data() + i + 2, &X0I, sizeof(ec::Float));
-        memcpy(inputImag.data() + i + 4, &X0I, sizeof(ec::Float));
-        memcpy(inputImag.data() + i + 5, &X0I, sizeof(ec::Float));
-        memcpy(inputImag.data() + i + 6, &X0I, sizeof(ec::Float));
+        inputReal[i + 2] += buffer[0] - buffer[1] - buffer[3];
 
-        if (i == 0)
+        if (i == 0 || i == 4)
         {
-            ec::Float c1 = X6R - X2R;
-            ec::Float c2 = (X1R - X3R - X5R + X7R) * sqrt22;
-            ec::Float c3 = (X5R - X3R - X1R + X7R) * sqrt22;
-            ec::Float c4 = X3R - X1R - X5R + X7R;
+            if (i != 0)
+            {
+                memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+                inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
 
-            inputReal[i + 0] += X1R + X2R + X3R + X4R + X5R + X6R + X7R;
+                memcpy(inputImag.data() + i, buffer.data() + 5, sizeof(ec::Float));
+                inputImag[i + 0] += buffer[6] + buffer[7];
+            }
+            else
+            {
+                memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+                inputReal[i + 1] -= buffer[2];
+            }
 
-            inputReal[i + 1] += c2 - X4R;
-            inputImag[i + 1] += c3 + c1;
-
-            inputReal[i + 2] += X4R - X2R - X6R;
-            inputImag[i + 2] += c4;
-
-            inputReal[i + 4] += X2R - X1R - X3R + X4R - X5R + X6R - X7R;
-
-            inputReal[i + 5] -= c2 + X4R;
-            inputImag[i + 5] -= c3 - c1;
-
-            // inputReal[i + 6] += X4R - X2R - X6R;
-            memcpy(inputReal.data() + i + 6, inputReal.data() + i + 2, sizeof(ec::Float));
-            inputImag[i + 6] -= c4;
+            memcpy(inputImag.data() + i + 1, buffer.data() + 3, sizeof(ec::Float));
+            inputImag[i + 1] -= buffer[1] + buffer[6];
         }
         else
         {
-            ec::Float c1 = X2R - X4R + X6R;
-            ec::Float c2 = X4I - X2I - X6I;
+            memcpy(inputReal.data() + i + 1, buffer.data(), sizeof(ec::Float));
+            inputReal[i + 1] += buffer[5] - buffer[2] - buffer[7];
 
-            ec::Float c3 = X1I - X3I;
+            inputImag[i + 0] += buffer[5] + buffer[6] + buffer[7];
 
-            inputReal[i + 0] += X1R + X2R + X3R + X4R + X5R + X6R + X7R;
-            inputImag[i + 0] += X1I + X2I + X3I + X4I + X5I + X6I + X7I;
-
-            inputReal[i + 2] += c3 - c1 + (X5I - X7I);
-            inputImag[i + 2] += c2 - X1R + X3R - X5R + X7R;
-
-            inputReal[i + 4] += X2R - X1R - X3R + X4R - X5R + X6R - X7R;
-            inputImag[i + 4] += X2I - X1I - X3I + X4I - X5I + X6I - X7I;
-
-            inputReal[i + 6] += (X7I - X5I) - (c3 + c1);
-            inputImag[i + 6] += c2 + X1R - X3R + X5R - X7R;
+            memcpy(inputImag.data() + i + 1, buffer.data() + 4, sizeof(ec::Float));
+            inputImag[i + 1] -= buffer[1] + buffer[6] - buffer[3];
         }
     }
 
@@ -928,9 +695,9 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         }
     }
 
-    for (size_t i = 128; i < 256; i++)
+    for (size_t i = 256; i < 512; i++)
     {
-        uint16_t newI = 512 - (i - 128);
+        uint16_t newI = 512 - (256 - i);
 
         memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
         memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
@@ -941,8 +708,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         memcpy(inputImag.data() + newI, &swapVal, sizeof(ec::Float));
     }
 
-    memcpy(inputReal.data() + 384, inputReal.data() + 640, sizeof(ec::Float));
-    memcpy(inputImag.data() + 384, inputImag.data() + 640, sizeof(ec::Float));
+    // for (size_t i = 0; i < WINDOW_SIZE; i++)
+    // {
+    //     std::cout << i << " " << inputReal[i].toFloat() << std::endl;
+    // }
 }
 
 /*
@@ -978,11 +747,17 @@ void init_angleTerms()
 
 void init_blackmanCoefs()
 {
-    for (size_t i = 0; i < WINDOW_SIZE; i++)
+    for (size_t i = 0; i < 512; i++)
     {
         float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
         blackmanCoefs[i] = coef;
     }
+
+    for (size_t i = 0; i < 512; i++)
+    {
+        memcpy(blackmanCoefs.data() + 512 + i, blackmanCoefs.data() + (511 - i), sizeof(ec::Float));
+    }
+
 }
 
 uint16_t reverse_bits(uint16_t x)
