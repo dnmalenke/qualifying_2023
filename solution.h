@@ -160,7 +160,6 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     // we now have 16 multiplication pipes
     // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ... 
 
-
     size_t p = WINDOW_SIZE / 2;
     size_t d = 2;
 
@@ -262,7 +261,6 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     {
         p /= 2;
         d *= 2;
-        // std::cout << "d: " << d << std::endl;
 
         size_t vals = 0;
         size_t valsC = p;
@@ -338,7 +336,7 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             valsC -= WINDOW_SIZE;
             valsC += 2 * p;
 
-            if (j == 0)
+            if (j == 0) // todo try && false
             {
                 for (size_t i = 0; i < 16 * 3; i += 3)
                 {
@@ -360,7 +358,6 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
             }
             else
             {
-                // std::cout << "dd: " << 2 * c / d << std::endl;
                 for (size_t i = 0; i < 8 * 4; i += 4)
                 {
                     streamHw.startStreamDataMemToFifo(realC + c * i / (4 * (d / 2)), 224 + i, 2 * c / d);
@@ -421,6 +418,216 @@ void sfft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
         }
     }
 
+    p /= 2;
+
+    size_t vals = 0;
+    size_t valsC = p;
+    size_t realC = p;
+    size_t imagC = WINDOW_SIZE + p;
+
+    // radix 32
+    {
+        for (size_t j = 0; j < WINDOW_SIZE / (2 * p); j += 2)
+        {
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
+            {
+                if (i == 24)
+                {
+                    vOff = 2 * p;
+                    iOff = 24;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (3 * d);
+
+                streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
+                streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
+                streamHw.startStreamDataFifoToMem(48 + i + 2, 2 * WINDOW_SIZE + c * i / (3 * d), c / d);
+            }
+
+            streamHw.runPipeline();
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
+            {
+                if (i == 32)
+                {
+                    vOff = 2 * p;
+                    iOff = 32;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
+
+                streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
+                streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
+                streamHw.startStreamDataFifoToMem(96 + i + 3, valsC + sIdx, c / d);
+            }
+
+            streamHw.runPipeline();
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
+            {
+                if (i == 32)
+                {
+                    vOff = 2 * p;
+                    iOff = 32;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
+
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                streamHw.startStreamDataFifoToMem(160 + i + 1, vals + sIdx, c / (2 * d));
+            }
+
+            streamHw.runPipeline();
+
+            // offset to imaginary numbers and do it again
+            vals += WINDOW_SIZE;
+            valsC += WINDOW_SIZE;
+
+
+            // imaginaries
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
+            {
+                if (i == 24)
+                {
+                    vOff = 2 * p;
+                    iOff = 24;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (3 * d);
+
+                streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
+                streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
+                streamHw.startStreamDataFifoToMem(48 + i + 2, 2 * WINDOW_SIZE + c * i / (3 * d), c / d);
+            }
+
+            streamHw.runPipeline();
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
+            {
+                if (i == 32)
+                {
+                    vOff = 2 * p;
+                    iOff = 32;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
+
+                streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
+                streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
+                streamHw.startStreamDataFifoToMem(96 + i + 3, valsC + sIdx, c / d);
+            }
+
+            streamHw.runPipeline();
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
+            {
+                if (i == 32)
+                {
+                    vOff = 2 * p;
+                    iOff = 32;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
+
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                streamHw.startStreamDataFifoToMem(160 + i + 1, vals + sIdx, c / (2 * d));
+            }
+
+            streamHw.runPipeline();
+
+            // remove the imaginary val offset and move on to the next pair
+            vals -= WINDOW_SIZE;
+            vals += 4 * p;
+
+            valsC -= WINDOW_SIZE;
+            valsC += 4 * p;
+
+
+            // complex multiplication
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 4; i += 4)
+            {
+                if (i == 16)
+                {
+                    vOff = 2 * p;
+                    iOff = 16;
+                }
+
+                size_t sIdx = c * (i - iOff) / (4 * (d / 2));
+
+                streamHw.startStreamDataMemToFifo(vOff + realC + sIdx, 224 + i, 2 * c / d);
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 224 + i + 1, 2 * c / d);
+
+                // imag * sin * -1
+                streamHw.startStreamDataMemToFifo(vOff + imagC + sIdx, 224 + i + 2, 2 * c / d);
+                streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 224 + i + 3, 2 * c / d);
+                streamHw.startStreamDataFifoToMem(96 + i + 3, 2 * WINDOW_SIZE + c * i / (4 * (d / 2)), 2 * c / d);
+            }
+            // real terms to 224 + i
+            // cos terms to 224 + i + 1
+            // imag terms 224 + i + 2
+            // sin terms 224 + i + 3
+            // output 96 + i + 3
+
+            streamHw.runPipeline();
+
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 8 * 7; i += 7)
+            {
+                if (i == 28)
+                {
+                    vOff = 2 * p;
+                    iOff = 28;
+                }
+
+                size_t sIdx = c * (i - iOff) / (7 * (d / 2));
+
+
+                streamHw.startStreamDataMemToFifo(vOff + realC + sIdx, 256 + i, 2 * c / d);
+                streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 256 + i + 1, 2 * c / d);
+
+                streamHw.startStreamDataMemToFifo(vOff + imagC + sIdx, 256 + i + 3, 2 * c / d);
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + sIdx, 256 + i + 4, 2 * c / d);
+
+                streamHw.startStreamDataFifoToMem(256 + i + 6, vOff + imagC + sIdx, 2 * c / d);
+            }
+            // real terms to 256 + i
+            // sin terms to 256 + i + 1
+            // imag terms 256 + i + 3
+            // cos terms 256 + i + 4
+            // output 256 + i + 6
+
+            streamHw.runPipeline();
+
+
+            for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
+            {
+                if (i == 32)
+                {
+                    vOff = 2 * p;
+                    iOff = 32;
+                }
+
+                size_t sIdx = vOff + c * (i - iOff) / (4 * d);
+
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                streamHw.startStreamDataFifoToMem(160 + i + 1, realC + sIdx, c / (2 * d));
+            }
+
+            streamHw.runPipeline();
+
+            // repeat for 3C, 5C, and 7C
+            realC += 4 * p;
+            imagC += 4 * p;
+        }
+    }
+
+
+    p /= 2;
+    vals = 0;
+    valsC = p;
+    realC = p;
+    imagC = WINDOW_SIZE + p;
+
     streamHw.copyFromHw(temp, 0, 2 * WINDOW_SIZE, 0);
 
     memcpy(inputReal.data(), temp.data(), WINDOW_SIZE * sizeof(ec::Float));
@@ -460,98 +667,10 @@ void fft(std::vector<ec::Float>& inputReal, std::vector<ec::Float>& inputImag)
     size_t realC = 32;
     size_t imagC = WINDOW_SIZE + 32;
 
-    if (true)
-    {
-        c /= 2;
-
-        //todo do this while generating the angle terms
-        vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3, c);
-        vecHw.assign32(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf3 + c, c);
-        vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4, c);
-        vecHw.assign32(3 * WINDOW_SIZE + (WINDOW_SIZE - 2 * c), buf4 + c, c);
-
-        // for every other pair of 32 sized arrays
-        // we need to rearrange their layout            
-        // todo see if i can readd the j != 0 stuff again
-        for (size_t j = 0; j < WINDOW_SIZE / (2 * 32); j++)
-        {
-            // take the last 16 values from the first array and swap them with the first 16 values from the second array
-            vecHw.assign32(vals + c, buf0, c);
-            vecHw.assign32(valsC, vals + c, c);
-            vecHw.assign32(buf0, valsC, c);
-
-            // now we can run the next set of addition but in 32 value chunks
-            vecHw.mul32(valsC, minusOne, buf0, 32); // we need to specify the 32 here because of a reassignment oversight in measurement
-
-            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-            vecHw.add32(vals, buf0, buf1);
-
-            // [2C - 3C] = [2C - 3C] + [3C - 4C]
-            vecHw.add32(vals, valsC, vals);
-
-            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-            vecHw.assign32(buf1, valsC);
-
-            // offset to imaginary numbers and do it again
-            vals += WINDOW_SIZE;
-            valsC += WINDOW_SIZE;
-
-            // take the last 16 values from the first array and swap them with the first 16 values from the second array
-            vecHw.assign32(vals + c, buf0, c);
-            vecHw.assign32(valsC, vals + c, c);
-            vecHw.assign32(buf0, valsC, c);
-
-            // imaginaries
-            // (-1)*[3C - 4C]
-            vecHw.mul32(valsC, minusOne, buf0, 32);
-
-            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-            vecHw.add32(vals, buf0, buf1);
-
-            // [2C - 3C] = [2C - 3C] + [3C - 4C]
-            vecHw.add32(vals, valsC, vals);
-
-            // [3C - 4C] = [2C - 3C] + (-1)*[3C - 4C]
-            vecHw.assign32(buf1, valsC);
-
-            // complex multiplication stage:
-            vecHw.mul32(realC, buf3, buf0); // real [C - 2C] * cos(C-2C) -> 2 * WINDOW_SIZE ( we're using this as a buffer cause we're done using it in this fft rn)
-
-            vecHw.mul32(imagC, buf4, buf1); // imag [C - 2C] *  sin(C-2C) -> 3 * WINDOW_SIZE     
-            vecHw.mul32(imagC, buf3, imagC); // imag [C - 2C] = imag [C - 2C] * cos(C-2C)
-
-            vecHw.mul32(realC, buf4, buf2); // imag [C - 2C] = real[C - 2C] * sin(C-2C)
-
-            vecHw.mul32(buf1, minusOne, buf1, 32); // (-1)* (imag [C - 2C] *  sin(C-2C))
-            vecHw.add32(buf0, buf1, realC); // real [C - 2C] = real [C - 2C] * cos(C-2C)  + (-1)* (imag [C - 2C] *  sin(C-2C))
-            vecHw.add32(imagC, buf2, imagC); // imag [C - 2C] = (imag [C - 2C] * cos(C-2C)) + (real[C - 2C] * sin(C-2C))
-
-            // repeat for 3C, 5C, and 7C
-            realC += 64;
-            imagC += 64;
-
-            // take the last 16 values from the first array and swap them with the first 16 values from the second array
-            vecHw.assign32(vals + c, buf0, c);
-            vecHw.assign32(valsC, vals + c, c);
-            vecHw.assign32(buf0, valsC, c);
-
-            // remove the imaginary val offset and move on to the next pair
-            vals -= WINDOW_SIZE;
-            valsC -= WINDOW_SIZE;
-
-            // take the last 16 values from the first array and swap them with the first 16 values from the second array
-            vecHw.assign32(vals + c, buf0, c);
-            vecHw.assign32(valsC, vals + c, c);
-            vecHw.assign32(buf0, valsC, c);
-
-            vals += 64;
-            valsC += 64;
-        }
-    }
 
     // for (size_t i = 0; i < 1 * WINDOW_SIZE; i++)
     // {
-    //     std::cout << i << " " << vecHw.m_mem[i] << std::endl;
+    //     std::cout << i << " " << vecHw.m_mem[WINDOW_SIZE +  i] << std::endl;
     // }
 
 
