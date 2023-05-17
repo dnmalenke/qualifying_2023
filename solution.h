@@ -81,24 +81,32 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
             }
 
             memcpy(preLogSpectrum.data() + i, &freqVal, sizeof(ec::Float));
-
-            freqVal = ec_log(freqVal);
-            freqVal *= spC0;
-
-            if (i > 0 && i < sizeSpectrum - 1)
-            {
-                freqVal += spC2;
-            }
-            else
-            {
-                freqVal += spC1;
-            }
-
-            memcpy(outputSpectrum.data() + i, &freqVal, sizeof(ec::Float));
         }
 
         idxStartWin += stepBetweenWins;
     }
+
+    for (size_t i = 0; i < sizeSpectrum; i++)
+    {
+        ec::Float freqVal;
+
+        memcpy(&freqVal, preLogSpectrum.data() + i, sizeof(ec::Float));
+
+        freqVal = ec_log(freqVal);
+        freqVal *= spC0;
+
+        if (i > 0 && i < sizeSpectrum - 1)
+        {
+            freqVal += spC2;
+        }
+        else
+        {
+            freqVal += spC1;
+        }
+
+        memcpy(outputSpectrum.data() + i, &freqVal, sizeof(ec::Float));
+    }
+
 
     return outputSpectrum;
 }
