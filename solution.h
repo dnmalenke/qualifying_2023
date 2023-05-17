@@ -266,19 +266,13 @@ void fft(std::vector<ec::Float>& inputReal)
 
             streamHw.runPipeline();
 
-            if (p == 256 && j == 1 && false)
+            for (size_t i = 0; i < 32 * 2; i += 2)
             {
+                streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                streamHw.startStreamDataFifoToMem(160 + i + 1, valsC + c * i / (4 * d), c / (2 * d));
             }
-            else
-            {
-                for (size_t i = 0; i < 32 * 2; i += 2)
-                {
-                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-                    streamHw.startStreamDataFifoToMem(160 + i + 1, valsC + c * i / (4 * d), c / (2 * d));
-                }
 
-                streamHw.runPipeline();
-            }
+            streamHw.runPipeline();
 
             // offset to imaginary numbers and do it again
             vals += WINDOW_SIZE;
@@ -337,6 +331,61 @@ void fft(std::vector<ec::Float>& inputReal)
                     streamHw.startStreamDataMemToFifo(realC + c * i / (3 * d), i, c / d);
                     streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 2 * p) + c * i / (3 * d), i + 1, c / d);
                     streamHw.startStreamDataFifoToMem(i + 2, realC + c * i / (3 * d), c / d);
+                }
+
+                streamHw.runPipeline();
+            }
+            else if (j == 1 && false)
+            {
+                for (size_t i = 0; i < 8 * 4; i += 4)
+                {
+                    streamHw.startStreamDataMemToFifo(realC + c * i / (4 * (d / 2)), 224 + i, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 4 * p) + c * i / (4 * (d / 2)), 224 + i + 1, 2 * c / d);
+
+                    // imag * sin * -1
+                    streamHw.startStreamDataMemToFifo(imagC + c * i / (4 * (d / 2)), 224 + i + 2, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 4 * p) + c * i / (4 * (d / 2)), 224 + i + 3, 2 * c / d);
+
+                    streamHw.startStreamDataFifoToMem(96 + i + 3, 2 * WINDOW_SIZE + c * i / (4 * (d / 2)), 2 * c / d);
+                }
+                // real terms to 224 + i
+                // cos terms to 224 + i + 1
+                // imag terms 224 + i + 2
+                // sin terms 224 + i + 3
+                // output 96 + i + 3
+
+                streamHw.runPipeline();
+
+
+                for (size_t i = 0; i < 8 * 7; i += 7)
+                {
+                    // real * sin
+
+                    streamHw.startStreamDataMemToFifo(realC + c * i / (7 * (d / 2)), 256 + i, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + (WINDOW_SIZE - 4 * p) + c * i / (7 * (d / 2)), 256 + i + 1, 2 * c / d);
+
+                    // imag * cos
+
+                    streamHw.startStreamDataMemToFifo(imagC + c * i / (7 * (d / 2)), 256 + i + 3, 2 * c / d);
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + (WINDOW_SIZE - 4 * p) + c * i / (7 * (d / 2)), 256 + i + 4, 2 * c / d);
+
+                    // add the two
+
+                    streamHw.startStreamDataFifoToMem(256 + i + 6, imagC + c * i / (7 * (d / 2)), 2 * c / d);
+                }
+                // real terms to 256 + i
+                // sin terms to 256 + i + 1
+                // imag terms 256 + i + 3
+                // cos terms 256 + i + 4
+                // output 256 + i + 6
+
+                streamHw.runPipeline();
+
+
+                for (size_t i = 0; i < 32 * 2; i += 2)
+                {
+                    streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
+                    streamHw.startStreamDataFifoToMem(160 + i + 1, realC + c * i / (4 * d), c / (2 * d));
                 }
 
                 streamHw.runPipeline();
@@ -616,126 +665,58 @@ void fft(std::vector<ec::Float>& inputReal)
 
     size_t vals = 0;
     size_t valsC = p;
+    size_t vvOff = 0;
 
     size_t realC = p;
     size_t imagC = WINDOW_SIZE + p;
+    size_t sc = 0;
 
-    for (size_t j = 0; j < WINDOW_SIZE / (2 * p); j += x)
+    // run the radix 4 for both real and imaginary
+    for (size_t j = 0, i = 0; j < WINDOW_SIZE; j++)
     {
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
+        if ((valsC + vvOff) % 4 != 2 && (valsC + vvOff) % 4 != 3 || (valsC + vvOff) < 6)
         {
-            if (i != 0 && i % (16 * 4 / x) == 0)
-            {
-                vOff += 2 * p;
-                iOff = i;
-            }
-
-            size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-            streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
-            streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
-            streamHw.startStreamDataFifoToMem(96 + i + 3, 2 * WINDOW_SIZE + c * i / (4 * d), c / d);
+            streamHw.startStreamDataMemToFifo(valsC + vvOff, 96 + 4 * i, 1);
+            streamHw.startStreamDataMemToFifo(vals + vvOff, 96 + 4 * i + 2, 1);
+            streamHw.startStreamDataFifoToMem(96 + 4 * i + 3, valsC + vvOff, 1);
         }
 
-        streamHw.runPipeline();
+        streamHw.startStreamDataMemToFifo(vals + vvOff, 48 + 3 * i, 1);
+        streamHw.startStreamDataMemToFifo(valsC + vvOff, 48 + 3 * i + 1, 1);
+        streamHw.startStreamDataFifoToMem(48 + 3 * i + 2, vals + vvOff, 1);
 
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
+        if (vals >= WINDOW_SIZE)
         {
-            if (i != 0 && i % (16 * 3 / x) == 0)
+            vals -= WINDOW_SIZE;
+            valsC -= WINDOW_SIZE;
+
+            if (vvOff % 2 == 0)
             {
-                vOff += 2 * p;
-                iOff = i;
+                vvOff += 1;
             }
-
-            size_t sIdx = vOff + c * (i - iOff) / (3 * d);
-
-            streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
-            streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
-            streamHw.startStreamDataFifoToMem(48 + i + 2, vals + sIdx, c / d);
+            else
+            {
+                vvOff += 2 * p - 1;
+            }
+        }
+        else
+        {
+            vals += WINDOW_SIZE;
+            valsC += WINDOW_SIZE;
         }
 
-        streamHw.runPipeline();
+        i++;
+        sc += 4;
 
-
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
+        if (sc == 32)
         {
-            if (i != 0 && i % (32 * 2 / x) == 0)
-            {
-                vOff += 2 * p;
-                iOff = i;
-            }
-
-            size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-            streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-            streamHw.startStreamDataFifoToMem(160 + i + 1, valsC + sIdx, c / (2 * d));
+            streamHw.runPipeline();
+            sc = 0;
+            i = 0;
         }
-
-        streamHw.runPipeline();
-
-        // offset to imaginary numbers and do it again
-        vals += WINDOW_SIZE;
-        valsC += WINDOW_SIZE;
-
-
-        // imaginaries
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 3; i += 3)
-        {
-            if (i != 0 && i % (16 * 3 / x) == 0)
-            {
-                vOff += 2 * p;
-                iOff = i;
-            }
-
-            size_t sIdx = vOff + c * (i - iOff) / (3 * d);
-
-            streamHw.startStreamDataMemToFifo(vals + sIdx, 48 + i, c / d);
-            streamHw.startStreamDataMemToFifo(valsC + sIdx, 48 + i + 1, c / d);
-            streamHw.startStreamDataFifoToMem(48 + i + 2, 2 * WINDOW_SIZE + c * i / (3 * d), c / d);
-        }
-
-        streamHw.runPipeline();
-
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 16 * 4; i += 4)
-        {
-            if (i != 0 && i % (16 * 4 / x) == 0)
-            {
-                vOff += 2 * p;
-                iOff = i;
-            }
-
-            size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-            streamHw.startStreamDataMemToFifo(valsC + sIdx, 96 + i, c / d);
-            streamHw.startStreamDataMemToFifo(vals + sIdx, 96 + i + 2, c / d);
-            streamHw.startStreamDataFifoToMem(96 + i + 3, valsC + sIdx, c / d);
-        }
-
-        streamHw.runPipeline();
-
-        for (size_t i = 0, vOff = 0, iOff = 0; i < 32 * 2; i += 2)
-        {
-            if (i != 0 && i % (32 * 2 / x) == 0)
-            {
-                vOff += 2 * p;
-                iOff = i;
-            }
-
-            size_t sIdx = vOff + c * (i - iOff) / (4 * d);
-
-            streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + c * i / (4 * d), 160 + i, c / (2 * d));
-            streamHw.startStreamDataFifoToMem(160 + i + 1, vals + sIdx, c / (2 * d));
-        }
-
-        streamHw.runPipeline();
-
-        // remove the imaginary val offset and move on to the next pair
-        vals -= WINDOW_SIZE;
-        vals += 64;
-
-        valsC -= WINDOW_SIZE;
-        valsC += 64;
     }
+
+    streamHw.runPipeline();
 
     // swap real and imaginary at element 3
     streamHw.startStreamDataMemToFifo(3, 160, 1);
@@ -744,8 +725,17 @@ void fft(std::vector<ec::Float>& inputReal)
     streamHw.startStreamDataFifoToMem(160 + 1, WINDOW_SIZE + 3, 1);
     streamHw.runPipeline();
 
-    for (size_t j = 0, i = 0, sc = 0; j < WINDOW_SIZE; j += 2)
+    sc = 0;
+
+    for (size_t j = 0, i = 0; j < WINDOW_SIZE; j += 2)
     {
+        size_t newI = reverse_bits(j);
+
+        if (newI > 768 || (newI > 256 && newI < 512))
+        {
+            continue;
+        }
+
         streamHw.startStreamDataMemToFifo(j, 48 + 3 * i, 1);
         streamHw.startStreamDataMemToFifo(j + 1, 48 + 3 * i + 1, 1);
         streamHw.startStreamDataFifoToMem(48 + 3 * i + 2, j, 1);
@@ -766,8 +756,15 @@ void fft(std::vector<ec::Float>& inputReal)
         }
     }
 
-    for (size_t j = WINDOW_SIZE, i = 0, sc = 0; j < 2 * WINDOW_SIZE; j += 2)
+    for (size_t j = WINDOW_SIZE, i = 0; j < 2 * WINDOW_SIZE; j += 2)
     {
+        size_t newI = reverse_bits(j - WINDOW_SIZE);
+
+        if (newI > 768 || (newI > 256 && newI < 512))
+        {
+            continue;
+        }
+
         streamHw.startStreamDataMemToFifo(j, 48 + 3 * i, 1);
         streamHw.startStreamDataMemToFifo(j + 1, 48 + 3 * i + 1, 1);
         streamHw.startStreamDataFifoToMem(48 + 3 * i + 2, j, 1);
@@ -788,17 +785,32 @@ void fft(std::vector<ec::Float>& inputReal)
         }
     }
 
-    streamHw.runPipeline();
-
-    for (size_t j = 0; j < 8; j++)
+    for (size_t j = 0, i = 0; j < WINDOW_SIZE; j++)
     {
-        streamHw.startStreamDataMemToFifo(128 * j, 256 + 7 * j, 128);
-        streamHw.startStreamDataMemToFifo(128 * j, 256 + 7 * j + 1, 128);
+        size_t newI = reverse_bits(j);
 
-        streamHw.startStreamDataMemToFifo(WINDOW_SIZE + 128 * j, 256 +7 * j + 3, 128);
-        streamHw.startStreamDataMemToFifo(WINDOW_SIZE + 128 * j, 256 +7 * j + 4, 128);
+        if (newI > 768 || (newI > 256 && newI < 512))
+        {
+            continue;
+        }
 
-        streamHw.startStreamDataFifoToMem(256 + 7 * j + 6, 128 * j, 128);
+        streamHw.startStreamDataMemToFifo(j, 256 + 7 * i, 1);
+        streamHw.startStreamDataMemToFifo(j, 256 + 7 * i + 1, 1);
+
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE + j, 256 + 7 * i + 3, 1);
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE + j, 256 + 7 * i + 4, 1);
+
+        streamHw.startStreamDataFifoToMem(256 + 7 * i + 6, j, 1);
+
+        i++;
+        sc += 4;
+        if (sc == 32)
+        {
+            streamHw.runPipeline();
+
+            sc = 0;
+            i = 0;
+        }
     }
 
     streamHw.runPipeline();
@@ -846,6 +858,14 @@ void init_angleTerms()
         float si = std::sin(aC * i);
         angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
     }
+
+    // for (size_t i = WINDOW_SIZE / 4; i < WINDOW_SIZE / 2; i++)
+    // {
+    //     angleTerms[i] = 0.0f;
+
+    //     angleTerms[i + WINDOW_SIZE] = 0.0f;
+    // }
+
 
     size_t x = WINDOW_SIZE / 4;
     size_t y = 2;

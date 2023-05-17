@@ -304,6 +304,11 @@ namespace ec
 
         inline void runPipeline()
         {
+            if (m_memToFifoConnections.size() < 32)
+            {
+                // std::cout << "inefficient" << std::endl;
+            }
+            
             // Pipeline is first finished, when no operation can do any progress.
 
             bool wasSomeProgress = true;
