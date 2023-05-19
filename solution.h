@@ -107,7 +107,6 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         memcpy(outputSpectrum.data() + i, &freqVal, sizeof(ec::Float));
     }
 
-
     return outputSpectrum;
 }
 
