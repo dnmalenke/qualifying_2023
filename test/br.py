@@ -8,5 +8,3 @@ for i in range(1024):
 # Print the generated list
 for i, num in enumerate(output):
     print(f"output[{i}] = {num}")
-
-

@@ -1,0 +1,14 @@
+ inputReal[i + 1]= sqrt22*X1I + X2I + sqrt22*X3I - sqrt22*X5I - X6I - sqrt22*X7I + X0R + sqrt22*X1R - sqrt22*X3R - X4R - sqrt22*X5R + sqrt22*X7R;
+ inputReal[i + 1]= X0I + sqrt22*X1I - sqrt22*X3I - X4I - sqrt22*X5I + sqrt22*X7I - sqrt22*X1R - X2R - sqrt22*X3R + sqrt22*X5R + X6R + sqrt22*X7R;
+ inputReal[i + 1]= X1I - X3I + X5I - X7I + X0R - X2R + X4R - X6R;
+ inputReal[i + 1]= X0I - X2I + X4I - X6I - X1R + X3R - X5R + X7R;
+ inputReal[i + 1]= sqrt22*X1I - X2I + sqrt22*X3I - sqrt22*X5I + X6I - sqrt22*X7I + X0R - sqrt22*X1R + sqrt22*X3R - X4R + sqrt22*X5R - sqrt22*X7R;
+ inputReal[i + 1]= X0I - sqrt22*X1I + sqrt22*X3I - X4I + sqrt22*X5I - sqrt22*X7I - sqrt22*X1R + X2R - sqrt22*X3R + sqrt22*X5R - X6R + sqrt22*X7R;
+ inputReal[i + 1]= X0R - X1R + X2R - X3R + X4R - X5R + X6R - X7R;
+ inputReal[i + 1]= X0I - X1I + X2I - X3I + X4I - X5I + X6I - X7I;
+ inputReal[i + 1]= X2I - sqrt22*X1I - sqrt22*X3I + sqrt22*X5I - X6I + sqrt22*X7I + X0R - sqrt22*X1R + sqrt22*X3R - X4R + sqrt22*X5R - sqrt22*X7R;
+ inputReal[i + 1]= X0I - sqrt22*X1I + sqrt22*X3I - X4I + sqrt22*X5I - sqrt22*X7I + sqrt22*X1R - X2R + sqrt22*X3R - sqrt22*X5R + X6R - sqrt22*X7R;
+ inputReal[i + 1]= X3I - X1I - X5I + X7I + X0R - X2R + X4R - X6R;
+ inputReal[i + 1]= X0I - X2I + X4I - X6I + X1R - X3R + X5R - X7R;
+ inputReal[i + 1]= sqrt22*X5I - X2I - sqrt22*X3I - sqrt22*X1I + X6I + sqrt22*X7I + X0R + sqrt22*X1R - sqrt22*X3R - X4R - sqrt22*X5R + sqrt22*X7R;
+ inputReal[i + 1]= X0I + sqrt22*X1I - sqrt22*X3I - X4I - sqrt22*X5I + sqrt22*X7I + sqrt22*X1R + X2R + sqrt22*X3R - sqrt22*X5R - X6R - sqrt22*X7R;
