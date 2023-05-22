@@ -22,7 +22,6 @@ static bool streamInitted = false;
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
-const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
 static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
 static const ec::Float zero = 0.0f;
@@ -50,8 +49,8 @@ struct Pair
 };
 
 
-std::vector<Pair> pairs;
-std::vector<int> special;
+static std::vector<Pair> pairs;
+static std::vector<int> special;
 
 static int off = 0;
 
@@ -86,6 +85,10 @@ std::vector<int> gen(int i)
 
 void init_pairs()
 {
+    pairs.clear();
+    special.clear();
+    off = 0;
+
     int N = WINDOW_SIZE;
     auto gg = gen(N);
 
@@ -130,7 +133,7 @@ void init_pairs()
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
     const size_t numSamples = inputSignal.size(); // assume divisible by 32
-
+    const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
     const size_t stepBetweenWins = static_cast<size_t>(ceil(WINDOW_SIZE * (1 - OVERLAP_RATIO)));
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
@@ -146,7 +149,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     init_angleTerms();
 
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
-    streamHw.resetMemTo0();
+    streamHw.resetStreamHw();
     streamInitted = false;
 
     streamHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
@@ -444,8 +447,7 @@ void fft(std::vector<ec::Float>& inputReal)
             streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * y + 1, 1);
 
             streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 3, 1);
-
-            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + (7 * y) + 4, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 4, 1);
 
             streamHw.startStreamDataFifoToMem(256 + 7 * y + 6, p, 1);
 
@@ -466,7 +468,7 @@ void fft(std::vector<ec::Float>& inputReal)
     streamHw.runPipeline();
     sc = 0;
 
-    streamHw.copyFromHw(inputReal, 0, sizeSpectrum, 0);
+    streamHw.copyFromHw(inputReal, 0, 513, 0);
 
     streamInitted = true;
 }
@@ -476,6 +478,9 @@ void fft(std::vector<ec::Float>& inputReal)
 */
 void init_angleTerms()
 {
+    angleTerms.clear();
+    angleTerms.resize(2 * WINDOW_SIZE);
+
     float aC(float(-2.0f * M_PI) / WINDOW_SIZE);
 
     for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
@@ -512,6 +517,9 @@ void init_angleTerms()
 
 void init_blackmanCoefs()
 {
+    blackmanCoefs.clear();
+    blackmanCoefs.resize(WINDOW_SIZE);
+
     for (size_t i = 0; i < 512; i++)
     {
         float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
