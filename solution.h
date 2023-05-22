@@ -22,6 +22,7 @@ static bool streamInitted = false;
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
+const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
 static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
 static const ec::Float zero = 0.0f;
@@ -40,10 +41,96 @@ void fft(std::vector<ec::Float>& inputReal);
 static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
 static std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
+struct Pair
+{
+    int i1;
+    int i2;
+
+    Pair(int f, int s) : i1(f), i2(s) {}
+};
+
+
+static std::vector<Pair> pairs;
+static std::vector<int> special;
+
+static int off = 0;
+
+std::vector<int> gen4()
+{
+    return std::vector<int>{off, off + 1, off + 2, off + 1};
+}
+
+std::vector<int> gen(int i)
+{
+    std::vector<int> l;
+
+    if (i == 4)
+    {
+        auto g = gen4();
+        l.insert(l.end(), g.begin(), g.end());
+        off += 4;
+    }
+    else
+    {
+        auto g = gen(i / 2);
+        l.insert(l.end(), g.begin(), g.end());
+        g = gen(i / 2);
+        l.insert(l.end(), g.begin(), g.end());
+
+        l[i / 4] = (off - i) + i / 4;
+        l[3 * i / 4] = (off - i) + i / 4;
+    }
+
+    return l;
+}
+
+void init_pairs()
+{
+    int N = WINDOW_SIZE;
+    auto gg = gen(N);
+
+    for (size_t j = 0; j < N / 2 + 1; j++)
+    {
+        if (j == 0 || j == N / 2)
+        {
+            pairs.push_back(Pair(j, j));
+            continue;
+        }
+
+        int val1 = -1;
+        int val2 = -1;
+
+        for (size_t i = 0; i < gg.size(); i++)
+        {
+            if (gg[i] == j || N - gg[i] == j)
+            {
+                if (i > N / 2 && val1 == -1)
+                {
+                    special.push_back(N - i);
+                }
+
+                if (val1 == -1)
+                {
+                    val1 = i;
+                    continue;
+                }
+
+                if (val2 == -1)
+                {
+                    val2 = i;
+                    break;
+                }
+            }
+        }
+
+        pairs.push_back(Pair(val1, val2));
+    }
+}
+
 std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 {
     const size_t numSamples = inputSignal.size(); // assume divisible by 32
-    const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
+
     const size_t stepBetweenWins = static_cast<size_t>(ceil(WINDOW_SIZE * (1 - OVERLAP_RATIO)));
     const size_t numWins = (numSamples - WINDOW_SIZE) / stepBetweenWins + 1;
 
@@ -54,10 +141,12 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
 
     size_t idxStartWin = 0;
 
+    init_pairs();
     init_blackmanCoefs();
     init_angleTerms();
 
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    streamHw.resetStreamHw();
     streamHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
 
     for (size_t j = 0; j < numWins; j++)
@@ -65,7 +154,7 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
         memcpy(signalWindow.data(), inputSignal.data() + idxStartWin, WINDOW_SIZE * sizeof(ec::Float));
 
         // puts cosine terms back into streamHw. we were using that space for buffering
-        streamHw.copyToHw(angleTerms, 0, 256, 2 * WINDOW_SIZE);
+        // streamHw.copyToHw(angleTerms, 0, 256, 2 * WINDOW_SIZE);
 
         fft(signalWindow);
 
@@ -117,6 +206,283 @@ void fft(std::vector<ec::Float>& inputReal)
     INIT(streamHw.createFifos(1000));
 
     std::vector<ec::Float> temp(2 * WINDOW_SIZE);
+
+    ec::Float swapVal;
+
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
+    {
+        uint16_t newI = reverse_bits(i);
+
+        if (i < newI)
+        {
+            memcpy(&swapVal, inputReal.data() + i, sizeof(ec::Float));
+            memcpy(inputReal.data() + i, inputReal.data() + newI, sizeof(ec::Float));
+            memcpy(inputReal.data() + newI, &swapVal, sizeof(ec::Float));
+        }
+    }
+
+    memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
+    memcpy(temp.data() + WINDOW_SIZE, blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
+
+    streamHw.copyToHw(temp, 0, 2 * WINDOW_SIZE, 0);
+
+    // apply blackman coefficients
+    size_t c = WINDOW_SIZE / 16;
+
+    for (size_t i = 0; i < 16 * 3; i += 3)
+    {
+        INIT(streamHw.addOpMulToPipeline(i, i + 1, i + 2));
+        streamHw.startStreamDataMemToFifo(c * i / 3, i, c);
+        streamHw.startStreamDataMemToFifo(WINDOW_SIZE + c * i / 3, i + 1, c);
+        streamHw.startStreamDataFifoToMem(i + 2, c * i / 3, c);
+    }
+
+    streamHw.runPipeline();
+    streamHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // clear out imaginary terms
+
+
+    // we now have 16 multiplication pipes
+    // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ... 
+
+    for (size_t i = 0; i < 16 * 3; i += 3)
+    {
+        INIT(streamHw.addOpAddToPipeline(48 + i, 48 + i + 1, 48 + i + 2));
+    }
+
+    // created 16 addition pipes at offset 48
+
+    for (size_t i = 0; i < 16 * 4; i += 4)
+    {
+        INIT(streamHw.addOpMulToPipeline(96 + i, minusOne, 96 + i + 1));
+        INIT(streamHw.addOpAddToPipeline(96 + i + 1, 96 + i + 2, 96 + i + 3));
+    }
+
+    for (size_t i = 0; i < 32 * 2; i += 2)
+    {
+        INIT(streamHw.addOpAddToPipeline(160 + i, zero, 160 + i + 1));
+    }
+
+    // -1 then add pipes at offset 96
+
+    // we need to make the pipelines needed for our complex multiplication starting at offset 224
+    for (size_t i = 0; i < 8 * 4; i += 4)
+    {
+        // real * cos
+        INIT(streamHw.addOpMulToPipeline(224 + i, 224 + i + 1, 96 + i + 2));
+
+        // imag * sin * -1
+        INIT(streamHw.addOpMulToPipeline(224 + i + 2, 224 + i + 3, 96 + i));
+    }
+    // real terms to 224 + i
+    // cos terms to 224 + i + 1
+    // imag terms 224 + i + 2
+    // sin terms 224 + i + 3
+    // output 96 + i + 3
+
+
+    for (size_t i = 0; i < 8 * 7; i += 7)
+    {
+        // real * sin
+        INIT(streamHw.addOpMulToPipeline(256 + i, 256 + i + 1, 256 + i + 2));
+
+        // imag * cos
+        INIT(streamHw.addOpMulToPipeline(256 + i + 3, 256 + i + 4, 256 + i + 5));
+
+        // add the two
+        INIT(streamHw.addOpAddToPipeline(256 + i + 2, 256 + i + 5, 256 + i + 6));
+    }
+    // real terms to 256 + i
+    // sin terms to 256 + i + 1
+    // imag terms 256 + i + 3
+    // cos terms 256 + i + 4
+    // output 256 + i + 6
+
+    for (size_t i = 0; i < 32 * 2; i += 2)
+    {
+        INIT(streamHw.addOpMulToPipeline(312 + i, minusOne, 312 + i + 1));
+    }
+    // add -1 pipes so we can do the -j
+
+    size_t N = WINDOW_SIZE;
+    size_t p = N;
+    size_t sc = 0;
+
+    while (p > 1)
+    {
+        p = p / 2;
+        c = N / (2 * p);
+        int r = 0;
+        int rC = c;
+
+        for (size_t j = 0, z = 0; j < p; j++)
+        {
+            for (size_t i = 0; i < c; i++)
+            {
+                if (i == c / 2 && c != 1)
+                {
+                    continue;
+                }
+
+                streamHw.startStreamDataMemToFifo(r + i, 48 + 3 * z, 1);
+                streamHw.startStreamDataMemToFifo(rC + i, 48 + 3 * z + 1, 1);
+                streamHw.startStreamDataFifoToMem(48 + 3 * z + 2, r + i, 1);
+
+                streamHw.startStreamDataMemToFifo(rC + i, 96 + 4 * z, 1);
+                streamHw.startStreamDataMemToFifo(r + i, 96 + 4 * z + 2, 1);
+                streamHw.startStreamDataFifoToMem(96 + 4 * z + 3, rC + i, 1);
+
+                z++;
+                sc += 4;
+
+                if (sc >= 24)
+                {
+                    streamHw.runPipeline();
+                    z = 0;
+                    sc = 0;
+                }
+            }
+
+            r += 2 * c;
+            rC += 2 * c;
+        }
+
+
+        sc = 0;
+        streamHw.runPipeline();
+
+        if (p == 1)
+        {
+            break;
+        }
+
+        rC = 2 * c;
+
+        for (size_t j = 0, z = 0, y = 0; j < p / 2; j++)
+        {
+            for (size_t i = 1; i < 2 * c; i++)
+            {
+                int wi = i * (p / 2);
+                if (N % wi == 0 && N / wi == 4)
+                {
+                    streamHw.startStreamDataMemToFifo(rC + i, 312 + 2 * z, 1);
+                    streamHw.startStreamDataFifoToMem(312 + 2 * z + 1, rC + i, 1);
+
+                    sc++;
+                    z++;
+                }
+                else
+                {
+                    bool inSpecial = false;
+                    for (size_t si = 0; si < special.size(); si++)
+                    {
+                        if (wi == special[si])
+                        {
+                            inSpecial = true;
+                            break;
+                        }
+                    }
+
+                    if (!inSpecial)
+                    {
+                        int pairI = 0;
+                        if ((rC + i) < N / 2)
+                        {
+                            pairI = rC + i;
+                        }
+                        else
+                        {
+                            pairI = N - (rC + i);
+                        }
+
+                        int dis = pairs[pairI].i2 - pairs[pairI].i1;
+
+                        streamHw.startStreamDataMemToFifo(rC + i, 224 + y * 4, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 224 + y * 4 + 1, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i + dis, 224 + y * 4 + 2, 1);
+                        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + wi, 224 + y * 4 + 3, 1);
+                        streamHw.startStreamDataFifoToMem(96 + y * 4 + 3, rC + i, 1);
+
+                        streamHw.startStreamDataMemToFifo(rC + i, 256 + y * 7, 1);
+                        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + wi, 256 + y * 7 + 1, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i + dis, 256 + y * 7 + 3, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 256 + y * 7 + 4, 1);
+                        streamHw.startStreamDataFifoToMem(256 + y * 7 + 6, rC + i + dis, 1);
+
+                        sc += 8;
+                        y++;
+                    }
+                }
+
+                if (sc >= 24) // try adjusting this
+                {
+                    streamHw.runPipeline();
+                    z = 0;
+                    sc = 0;
+                    y = 0;
+                }
+            }
+
+            rC += 4 * c;
+        }
+
+        streamHw.runPipeline();
+    }
+
+    streamHw.runPipeline();
+
+    sc = 0;
+
+    for (size_t p = 0, y = 0, z = 0; p < pairs.size(); p++)
+    {
+        if (pairs[p].i1 == pairs[p].i2)
+        {
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3 + 1, 1);
+            streamHw.startStreamDataFifoToMem(z * 3 + 2, WINDOW_SIZE + p, 1);
+
+            sc += 2;
+            z++;
+        }
+        else
+        {
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * y, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * y + 1, 1);
+
+            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 3, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 4, 1);
+
+            streamHw.startStreamDataFifoToMem(256 + 7 * y + 6, WINDOW_SIZE + p, 1);
+
+            y++;
+            sc += 4;
+        }
+
+        if (sc >= 30)
+        {
+            streamHw.runPipeline();
+
+            sc = 0;
+            z = 0;
+            y = 0;
+        }
+    }
+
+    streamHw.runPipeline();
+    sc = 0;
+
+    streamHw.copyFromHw(inputReal, WINDOW_SIZE, sizeSpectrum, 0);
+
+    streamInitted = true;
+}
+
+void fft2(std::vector<ec::Float>& inputReal)
+{
+    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+
+    INIT(streamHw.createFifos(1000));
+
+    std::vector<ec::Float> temp(2 * WINDOW_SIZE);
+
 
     memcpy(temp.data(), inputReal.data(), WINDOW_SIZE * sizeof(ec::Float));
     memcpy(temp.data() + WINDOW_SIZE, blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
@@ -900,6 +1266,21 @@ void init_blackmanCoefs()
     for (size_t i = 0; i < 512; i++)
     {
         memcpy(blackmanCoefs.data() + 512 + i, blackmanCoefs.data() + (511 - i), sizeof(ec::Float));
+    }
+
+
+    ec::Float swapVal;
+
+    for (size_t i = 0; i < WINDOW_SIZE; i++)
+    {
+        uint16_t newI = reverse_bits(i);
+
+        if (i < newI)
+        {
+            memcpy(&swapVal, blackmanCoefs.data() + i, sizeof(ec::Float));
+            memcpy(blackmanCoefs.data() + i, blackmanCoefs.data() + newI, sizeof(ec::Float));
+            memcpy(blackmanCoefs.data() + newI, &swapVal, sizeof(ec::Float));
+        }
     }
 
 }
