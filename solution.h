@@ -152,7 +152,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     streamHw.resetStreamHw();
     streamInitted = false;
 
-    streamHw.copyToHw(angleTerms, 0, 2 * WINDOW_SIZE, 2 * WINDOW_SIZE);
+    streamHw.copyToHw(angleTerms, 0, 510, 2 * WINDOW_SIZE);
+    streamHw.copyToHw(angleTerms, WINDOW_SIZE, 510, 3 * WINDOW_SIZE);
     streamHw.copyToHw(blackmanCoefs, 0, WINDOW_SIZE, WINDOW_SIZE);
 
     for (size_t j = 0; j < numWins; j++)
@@ -236,8 +237,6 @@ void fft(std::vector<ec::Float>& inputReal)
     }
 
     streamHw.runPipeline();
-    // streamHw.resetMemTo0(WINDOW_SIZE, WINDOW_SIZE); // clear out imaginary terms
-
 
     // we now have 16 multiplication pipes
     // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ... 
@@ -332,7 +331,7 @@ void fft(std::vector<ec::Float>& inputReal)
                 z++;
                 sc += 4;
 
-                if (sc >= 24)
+                if (sc >= 32)
                 {
                     streamHw.runPipeline();
                     z = 0;
@@ -344,9 +343,8 @@ void fft(std::vector<ec::Float>& inputReal)
             rC += 2 * c;
         }
 
-
-        sc = 0;
         streamHw.runPipeline();
+        sc = 0;
 
         if (p == 1)
         {
@@ -490,28 +488,6 @@ void init_angleTerms()
 
         float si = std::sin(aC * i);
         angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
-    }
-
-    // for (size_t i = WINDOW_SIZE / 4; i < WINDOW_SIZE / 2; i++)
-    // {
-    //     angleTerms[i] = 0.0f;
-
-    //     angleTerms[i + WINDOW_SIZE] = 0.0f;
-    // }
-
-
-    size_t x = WINDOW_SIZE / 4;
-    size_t y = 2;
-    while (x > 0)
-    {
-        for (size_t i = 0; i < y * x; i += y)
-        {
-            memcpy(angleTerms.data() + WINDOW_SIZE - (2 * x) + i / y, angleTerms.data() + i, sizeof(ec::Float));
-            memcpy(angleTerms.data() + WINDOW_SIZE + WINDOW_SIZE - (2 * x) + i / y, angleTerms.data() + WINDOW_SIZE + i, sizeof(ec::Float));
-        }
-
-        x /= 2;
-        y *= 2;
     }
 }
 
