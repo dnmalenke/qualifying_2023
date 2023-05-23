@@ -22,10 +22,8 @@ static bool streamInitted = false;
 
 static constexpr float OVERLAP_RATIO = 0.75;
 static constexpr size_t WINDOW_SIZE = 1024;
-static const ec::Float PI = 3.14159265358979323846f;
 static const ec::Float minusOne = -1.0f;
 static const ec::Float zero = 0.0f;
-static const ec::Float sqrt22 = (float)sqrt(2.0f) / 2.0f;
 
 static const ec::Float spC0((float)(10.0f / log(10.0f)));
 static const ec::Float spC1((float)(10.0f * log(125.0f / 131072.0f) / log(10.0f)));
@@ -360,11 +358,7 @@ void fft(std::vector<ec::Float>& inputReal)
                 int wi = i * (p / 2);
                 if (N % wi == 0 && N / wi == 4)
                 {
-                    streamHw.startStreamDataMemToFifo(rC + i, 312 + 2 * z, 1);
-                    streamHw.startStreamDataFifoToMem(312 + 2 * z + 1, rC + i, 1);
-
-                    sc++;
-                    z++;
+                   
                 }
                 else
                 {
@@ -409,7 +403,35 @@ void fft(std::vector<ec::Float>& inputReal)
                     }
                 }
 
-                if (sc >= 24) // try adjusting this
+                if (sc >= 32)
+                {
+                    streamHw.runPipeline();
+                    z = 0;
+                    sc = 0;
+                    y = 0;
+                }
+            }
+
+            rC += 4 * c;
+        }
+
+        rC = 2 * c;
+
+        for (size_t j = 0, z = 0, y = 0; j < p / 2; j++)
+        {
+            for (size_t i = 1; i < 2 * c; i++)
+            {
+                int wi = i * (p / 2);
+                if (N % wi == 0 && N / wi == 4)
+                {
+                    streamHw.startStreamDataMemToFifo(rC + i, 312 + 2 * z, 1);
+                    streamHw.startStreamDataFifoToMem(312 + 2 * z + 1, rC + i, 1);
+
+                    sc++;
+                    z++;
+                }
+
+                if (sc >= 32) 
                 {
                     streamHw.runPipeline();
                     z = 0;
@@ -432,12 +454,7 @@ void fft(std::vector<ec::Float>& inputReal)
     {
         if (pairs[p].i1 == pairs[p].i2)
         {
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3, 1);
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3 + 1, 1);
-            streamHw.startStreamDataFifoToMem(z * 3 + 2, p, 1);
-
-            sc += 2;
-            z++;
+          
         }
         else
         {
@@ -453,7 +470,7 @@ void fft(std::vector<ec::Float>& inputReal)
             sc += 4;
         }
 
-        if (sc >= 30)
+        if (sc >= 32)
         {
             streamHw.runPipeline();
 
@@ -463,7 +480,28 @@ void fft(std::vector<ec::Float>& inputReal)
         }
     }
 
-    streamHw.runPipeline();
+    for (size_t p = 0, y = 0, z = 0; p < pairs.size(); p++)
+    {
+        if (pairs[p].i1 == pairs[p].i2)
+        {
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3 + 1, 1);
+            streamHw.startStreamDataFifoToMem(z * 3 + 2, p, 1);
+
+            sc += 2;
+            z++;
+        }
+
+        if (sc >= 32)
+        {
+            streamHw.runPipeline();
+
+            sc = 0;
+            z = 0;
+            y = 0;
+        }
+    }
+    
     sc = 0;
 
     streamHw.copyFromHw(inputReal, 0, 513, 0);
