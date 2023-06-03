@@ -35,7 +35,7 @@ uint16_t reverse_bits(uint16_t x);
 
 void fft(std::vector<ec::Float>& inputReal);
 
-static std::vector<ec::Float> angleTerms(2 * WINDOW_SIZE);
+static std::vector<ec::Float> angleTerms(WINDOW_SIZE);
 static std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
 
 struct Pair
@@ -45,7 +45,6 @@ struct Pair
 
     Pair(int f, int s) : i1(f), i2(s) {}
 };
-
 
 static std::vector<Pair> pairs;
 static std::vector<int> special;
@@ -150,9 +149,12 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     streamHw.resetStreamHw();
     streamInitted = false;
 
-    streamHw.copyToHw(angleTerms, 0, 510, 2 * WINDOW_SIZE);
-    streamHw.copyToHw(angleTerms, WINDOW_SIZE, 510, 3 * WINDOW_SIZE);
-    streamHw.copyToHw(blackmanCoefs, 0, WINDOW_SIZE, WINDOW_SIZE);
+    std::vector<ec::Float> temp(2 * WINDOW_SIZE - 4);
+
+    memcpy(temp.data(), blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
+    memcpy(temp.data() + WINDOW_SIZE, angleTerms.data(), 1020 * sizeof(ec::Float));
+
+    streamHw.copyToHw(temp, 1, WINDOW_SIZE + 1020 - 1, WINDOW_SIZE + 1);
 
     for (size_t j = 0; j < numWins; j++)
     {
@@ -205,7 +207,7 @@ void fft(std::vector<ec::Float>& inputReal)
 {
     ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
 
-    INIT(streamHw.createFifos(1000));
+    INIT(streamHw.createFifos(376));
 
     ec::Float swapVal;
 
@@ -250,11 +252,6 @@ void fft(std::vector<ec::Float>& inputReal)
     {
         INIT(streamHw.addOpMulToPipeline(96 + i, minusOne, 96 + i + 1));
         INIT(streamHw.addOpAddToPipeline(96 + i + 1, 96 + i + 2, 96 + i + 3));
-    }
-
-    for (size_t i = 0; i < 32 * 2; i += 2)
-    {
-        INIT(streamHw.addOpAddToPipeline(160 + i, zero, 160 + i + 1));
     }
 
     // -1 then add pipes at offset 96
@@ -351,18 +348,15 @@ void fft(std::vector<ec::Float>& inputReal)
 
         rC = 2 * c;
 
-        for (size_t j = 0, z = 0, y = 0; j < p / 2; j++)
+        for (size_t j = 0, z = 0; j < p / 2; j++)
         {
             for (size_t i = 1; i < 2 * c; i++)
             {
                 int wi = i * (p / 2);
-                if (N % wi == 0 && N / wi == 4)
-                {
-                   
-                }
-                else
+                if (N % wi != 0 || N / wi != 4)
                 {
                     bool inSpecial = false;
+
                     for (size_t si = 0; si < special.size(); si++)
                     {
                         if (wi == special[si])
@@ -386,20 +380,20 @@ void fft(std::vector<ec::Float>& inputReal)
 
                         int dis = pairs[pairI].i2 - pairs[pairI].i1;
 
-                        streamHw.startStreamDataMemToFifo(rC + i, 224 + y * 4, 1);
-                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 224 + y * 4 + 1, 1);
-                        streamHw.startStreamDataMemToFifo(rC + i + dis, 224 + y * 4 + 2, 1);
-                        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + wi, 224 + y * 4 + 3, 1);
-                        streamHw.startStreamDataFifoToMem(96 + y * 4 + 3, rC + i, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i, 224 + z * 4, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 224 + z * 4 + 1, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i + dis, 224 + z * 4 + 2, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + 510 + wi, 224 + z * 4 + 3, 1);
+                        streamHw.startStreamDataFifoToMem(96 + z * 4 + 3, rC + i, 1);
 
-                        streamHw.startStreamDataMemToFifo(rC + i, 256 + y * 7, 1);
-                        streamHw.startStreamDataMemToFifo(3 * WINDOW_SIZE + wi, 256 + y * 7 + 1, 1);
-                        streamHw.startStreamDataMemToFifo(rC + i + dis, 256 + y * 7 + 3, 1);
-                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 256 + y * 7 + 4, 1);
-                        streamHw.startStreamDataFifoToMem(256 + y * 7 + 6, rC + i + dis, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i, 256 + z * 7, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + 510 + wi, 256 + z * 7 + 1, 1);
+                        streamHw.startStreamDataMemToFifo(rC + i + dis, 256 + z * 7 + 3, 1);
+                        streamHw.startStreamDataMemToFifo(2 * WINDOW_SIZE + wi, 256 + z * 7 + 4, 1);
+                        streamHw.startStreamDataFifoToMem(256 + z * 7 + 6, rC + i + dis, 1);
 
                         sc += 8;
-                        y++;
+                        z++;
                     }
                 }
 
@@ -408,7 +402,7 @@ void fft(std::vector<ec::Float>& inputReal)
                     streamHw.runPipeline();
                     z = 0;
                     sc = 0;
-                    y = 0;
+                    z = 0;
                 }
             }
 
@@ -417,7 +411,7 @@ void fft(std::vector<ec::Float>& inputReal)
 
         rC = 2 * c;
 
-        for (size_t j = 0, z = 0, y = 0; j < p / 2; j++)
+        for (size_t j = 0, z = 0; j < p / 2; j++)
         {
             for (size_t i = 1; i < 2 * c; i++)
             {
@@ -431,12 +425,11 @@ void fft(std::vector<ec::Float>& inputReal)
                     z++;
                 }
 
-                if (sc >= 32) 
+                if (sc >= 32)
                 {
                     streamHw.runPipeline();
                     z = 0;
                     sc = 0;
-                    y = 0;
                 }
             }
 
@@ -444,29 +437,23 @@ void fft(std::vector<ec::Float>& inputReal)
         }
 
         streamHw.runPipeline();
+
+        sc = 0;
     }
 
-    streamHw.runPipeline();
-
-    sc = 0;
-
-    for (size_t p = 0, y = 0, z = 0; p < pairs.size(); p++)
+    for (size_t p = 0, z = 0; p < pairs.size(); p++)
     {
-        if (pairs[p].i1 == pairs[p].i2)
+        if (pairs[p].i1 != pairs[p].i2)
         {
-          
-        }
-        else
-        {
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * y, 1);
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * y + 1, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * z, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i1, 256 + 7 * z + 1, 1);
 
-            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 3, 1);
-            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * y + 4, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * z + 3, 1);
+            streamHw.startStreamDataMemToFifo(pairs[p].i2, 256 + 7 * z + 4, 1);
 
-            streamHw.startStreamDataFifoToMem(256 + 7 * y + 6, p, 1);
+            streamHw.startStreamDataFifoToMem(256 + 7 * z + 6, p, 1);
 
-            y++;
+            z++;
             sc += 4;
         }
 
@@ -476,33 +463,22 @@ void fft(std::vector<ec::Float>& inputReal)
 
             sc = 0;
             z = 0;
-            y = 0;
         }
     }
 
-    for (size_t p = 0, y = 0, z = 0; p < pairs.size(); p++)
-    {
-        if (pairs[p].i1 == pairs[p].i2)
-        {
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3, 1);
-            streamHw.startStreamDataMemToFifo(pairs[p].i1, z * 3 + 1, 1);
-            streamHw.startStreamDataFifoToMem(z * 3 + 2, p, 1);
+    int z = 0;
 
-            sc += 2;
-            z++;
-        }
+    streamHw.startStreamDataMemToFifo(0, z * 3, 1);
+    streamHw.startStreamDataMemToFifo(0, z * 3 + 1, 1);
+    streamHw.startStreamDataFifoToMem(z * 3 + 2, 0, 1);
 
-        if (sc >= 32)
-        {
-            streamHw.runPipeline();
+    z++;
 
-            sc = 0;
-            z = 0;
-            y = 0;
-        }
-    }
-    
-    sc = 0;
+    streamHw.startStreamDataMemToFifo(512, z * 3, 1);
+    streamHw.startStreamDataMemToFifo(512, z * 3 + 1, 1);
+    streamHw.startStreamDataFifoToMem(z * 3 + 2, 512, 1);
+
+    streamHw.runPipeline();
 
     streamHw.copyFromHw(inputReal, 0, 513, 0);
 
@@ -519,13 +495,13 @@ void init_angleTerms()
 
     float aC(float(-2.0f * M_PI) / WINDOW_SIZE);
 
-    for (size_t i = 0; i < WINDOW_SIZE / 2; i++)
+    for (size_t i = 1; i < WINDOW_SIZE / 2 - 2; i++)
     {
         float co = std::cos(aC * i);
         angleTerms[i] = std::cos(aC * i);
 
         float si = std::sin(aC * i);
-        angleTerms[i + WINDOW_SIZE] = std::sin(aC * i);
+        angleTerms[i + 510] = std::sin(aC * i);
     }
 }
 
@@ -534,7 +510,7 @@ void init_blackmanCoefs()
     blackmanCoefs.clear();
     blackmanCoefs.resize(WINDOW_SIZE);
 
-    for (size_t i = 0; i < 512; i++)
+    for (size_t i = 17; i < 512; i++)
     {
         float coef = 0.42f - 0.5f * std::cos(i * 2.0f * M_PI / (WINDOW_SIZE - 1)) + 0.08f * std::cos(i * 4.0f * M_PI / (WINDOW_SIZE - 1));
         blackmanCoefs[i] = coef;
@@ -544,7 +520,6 @@ void init_blackmanCoefs()
     {
         memcpy(blackmanCoefs.data() + 512 + i, blackmanCoefs.data() + (511 - i), sizeof(ec::Float));
     }
-
 
     ec::Float swapVal;
 
