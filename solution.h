@@ -5,7 +5,7 @@
 #pragma once
 
 #include "ec2023/ec2023.h"
-#include <iostream>      
+#include <iostream>
 #include <iomanip>
 #include <vector>
 #include <cassert>
@@ -16,7 +16,11 @@
 
 #define SWEET_SPOT 8
 
-#define INIT(x) if(!streamInitted){x;}
+#define INIT(x)         \
+    if (!streamInitted) \
+    {                   \
+        x;              \
+    }
 
 static bool streamInitted = false;
 
@@ -33,7 +37,7 @@ void init_blackmanCoefs();
 void init_angleTerms();
 uint16_t reverse_bits(uint16_t x);
 
-void fft(std::vector<ec::Float>& inputReal);
+void fft(std::vector<ec::Float> &inputReal);
 
 static std::vector<ec::Float> angleTerms(WINDOW_SIZE);
 static std::vector<ec::Float> blackmanCoefs(WINDOW_SIZE);
@@ -47,7 +51,7 @@ struct Pair
 };
 
 static std::vector<Pair> pairs;
-static std::vector<int> special;
+static std::vector<int> special; // rotator skips in the flow-graph
 
 static int off = 0;
 
@@ -127,7 +131,7 @@ void init_pairs()
     }
 }
 
-std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
+std::vector<ec::Float> process_signal(const std::vector<ec::Float> &inputSignal)
 {
     const size_t numSamples = inputSignal.size(); // assume divisible by 32
     const size_t sizeSpectrum = (WINDOW_SIZE / 2) + 1;
@@ -145,7 +149,10 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     init_blackmanCoefs();
     init_angleTerms();
 
-    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    // ec::VecHw &vecHw = *ec::VecHw::getSingletonVecHw();
+    // vecHw.resetMemTo0();
+
+    ec::StreamHw &streamHw = *ec::StreamHw::getSingletonStreamHw();
     streamHw.resetStreamHw();
     streamInitted = false;
 
@@ -154,7 +161,8 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     memcpy(temp.data(), blackmanCoefs.data(), WINDOW_SIZE * sizeof(ec::Float));
     memcpy(temp.data() + WINDOW_SIZE, angleTerms.data(), 1020 * sizeof(ec::Float));
 
-    streamHw.copyToHw(temp, 1, WINDOW_SIZE + 1020 - 1, WINDOW_SIZE + 1);
+    streamHw.copyToHw(temp, 1, WINDOW_SIZE + 1020 - 1, 1 * WINDOW_SIZE + 1);
+    // vecHw.copyToHw(temp, 1, WINDOW_SIZE + 1020 - 1, 2 * WINDOW_SIZE + 1);
 
     for (size_t j = 0; j < numWins; j++)
     {
@@ -203,9 +211,10 @@ std::vector<ec::Float> process_signal(const std::vector<ec::Float>& inputSignal)
     return outputSpectrum;
 }
 
-void fft(std::vector<ec::Float>& inputReal)
+
+void fft(std::vector<ec::Float> &inputReal)
 {
-    ec::StreamHw& streamHw = *ec::StreamHw::getSingletonStreamHw();
+    ec::StreamHw &streamHw = *ec::StreamHw::getSingletonStreamHw();
 
     INIT(streamHw.createFifos(376));
 
@@ -223,6 +232,7 @@ void fft(std::vector<ec::Float>& inputReal)
         }
     }
 
+
     streamHw.copyToHw(inputReal, 0, WINDOW_SIZE, 0);
 
     // apply blackman coefficients
@@ -239,7 +249,7 @@ void fft(std::vector<ec::Float>& inputReal)
     streamHw.runPipeline();
 
     // we now have 16 multiplication pipes
-    // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ... 
+    // pipe (in0,in1,out); 0,1,2; 3,4,5; 6,7,8; 9,10,11; ...
 
     for (size_t i = 0; i < 16 * 3; i += 3)
     {
@@ -270,7 +280,6 @@ void fft(std::vector<ec::Float>& inputReal)
     // imag terms 224 + i + 2
     // sin terms 224 + i + 3
     // output 96 + i + 3
-
 
     for (size_t i = 0; i < 8 * 7; i += 7)
     {
@@ -306,6 +315,7 @@ void fft(std::vector<ec::Float>& inputReal)
         int r = 0;
         int rC = c;
 
+        // cross addition
         for (size_t j = 0, z = 0; j < p; j++)
         {
             for (size_t i = 0; i < c; i++)
@@ -348,6 +358,7 @@ void fft(std::vector<ec::Float>& inputReal)
 
         rC = 2 * c;
 
+        // complex multiplication 
         for (size_t j = 0, z = 0; j < p / 2; j++)
         {
             for (size_t i = 1; i < 2 * c; i++)
@@ -531,7 +542,6 @@ void init_blackmanCoefs()
             memcpy(blackmanCoefs.data() + newI, &swapVal, sizeof(ec::Float));
         }
     }
-
 }
 
 uint16_t reverse_bits(uint16_t x)
