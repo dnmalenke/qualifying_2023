@@ -15,6 +15,7 @@ namespace ec
   class VecHw final
   {
   private:
+    std::vector<float> m_mem; // cannot be vector<ec::Float>, because then all ops, even initialisation, are measured individually.
 
     static inline VecHw* pSingletonVecHw = nullptr;
 
@@ -26,7 +27,6 @@ namespace ec
     VecHw(const VecHw& other) = delete;
 
   public:
-    std::vector<float> m_mem; // cannot be vector<ec::Float>, because then all ops, even initialisation, are measured individually.
 
     static inline VecHw* getSingletonVecHw()
     {

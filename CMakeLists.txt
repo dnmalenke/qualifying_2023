@@ -47,3 +47,4 @@ add_custom_command(TARGET ${PROJECT_NAME}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_LIST_DIR}/reference_spectrum.txt"
     "${CMAKE_BINARY_DIR}/bin/")
+

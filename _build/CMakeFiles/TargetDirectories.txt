@@ -1,0 +1,3 @@
+/home/dnmal/source/finals_2023/_build/CMakeFiles/EC2023.dir
+/home/dnmal/source/finals_2023/_build/CMakeFiles/edit_cache.dir
+/home/dnmal/source/finals_2023/_build/CMakeFiles/rebuild_cache.dir

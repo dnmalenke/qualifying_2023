@@ -9,7 +9,9 @@
 #include "ec_measurement.h"
 #include "ec_float.h"
 
+#include <cmath>
 #include <vector>
+
 
 namespace ec
 {
@@ -59,6 +61,8 @@ namespace ec
     Float& operator--() noexcept;    // prefix decrement
     Float operator--(int) noexcept;  // postfix decrement
 
+    bool isNan()const noexcept;
+
  
 
     friend class VecHw;
@@ -79,13 +83,13 @@ namespace ec
     friend Float ec_log10(Float input);
     friend Float ec_pow(Float base, Float exp);
     
-float toFloat()const  noexcept; 
+
   private:
 
    
     float m_value = 0.0f;
     
-    
+    float toFloat()const  noexcept;
   };
 
 
@@ -316,6 +320,12 @@ float toFloat()const  noexcept;
     Float old = *this;
     operator--();
     return old;
+  }
+
+
+  inline bool Float::isNan() const noexcept
+  {
+    return std::isnan(m_value);
   }
 
 

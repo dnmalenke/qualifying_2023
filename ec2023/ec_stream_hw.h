@@ -312,7 +312,7 @@ namespace ec
       {
         wasSomeProgress = false;
         size_t numOpsMaxPipelineStep = 0;
-        Measurement::MeasType opTypeMaxPipelineStep = Measurement::MeasType::addition;
+        Measurement::MeasType opTypeMaxPipelineStep = Measurement::MeasType::add_StreamHw;
         size_t scoreOfOpMaxPipelineStep = 0;
 
         // Try to stream data from mem to fifos
@@ -333,14 +333,16 @@ namespace ec
           const size_t numOpsDone = operation.executePrecountedStep();
           wasSomeProgress = numOpsDone || wasSomeProgress;
 
-          const size_t scorePerOp = Measurement::get(operation.getMeasurementInfoForOp()).m_runtimeWeight;
+          Measurement::incEnergy(operation.getMeasurementInfoForOp(), numOpsDone);
 
-          // search which operation is the bottleneck of the pipeline step
-          if (numOpsDone * scorePerOp > numOpsMaxPipelineStep * scoreOfOpMaxPipelineStep)
+          // search which operation is the speed bottleneck of the pipeline step
+          const size_t speedScorePerOp = Measurement::get(operation.getMeasurementInfoForOp()).m_speedWeight;
+
+          if (numOpsDone * speedScorePerOp > numOpsMaxPipelineStep * scoreOfOpMaxPipelineStep)
           {
             numOpsMaxPipelineStep = numOpsDone;
             opTypeMaxPipelineStep = operation.getMeasurementInfoForOp();
-            scoreOfOpMaxPipelineStep = scorePerOp;
+            scoreOfOpMaxPipelineStep = speedScorePerOp;
           }
         }
 
@@ -351,7 +353,8 @@ namespace ec
           wasSomeProgress = numElsPoped || wasSomeProgress;
         }
 
-        Measurement::inc(opTypeMaxPipelineStep, numOpsMaxPipelineStep);
+        // For speed score, add ONLY the bottleneck operation speed score.
+        Measurement::incSpeed(opTypeMaxPipelineStep, numOpsMaxPipelineStep);
       }
 
       m_fifoToMemConnections.clear();
@@ -392,7 +395,7 @@ namespace ec
 
       for (size_t I = 0; I < num; I++)
       {
-        Measurement::inc(Measurement::MeasType::copy4B_VecHw);
+        Measurement::inc(Measurement::MeasType::copy4B_StreamHw);
         m_mem[idx_to + I] = data[idx_from + I].m_value;
       }
 
@@ -400,7 +403,7 @@ namespace ec
 
     inline void copyFromHw(std::vector<ec::Float>& data, size_t idx_from, size_t num, size_t idx_to)
     {
-      Measurement::inc(Measurement::MeasType::initCopy_VecHw);
+      Measurement::inc(Measurement::MeasType::initCopy_StreamHw);
 
       if (idx_from + num > m_mem.size())
         throw std::runtime_error("Size of memory of StreamHw to copy from does not fit the elements to be copied.");

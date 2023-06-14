@@ -497,10 +497,7 @@ void init_angleTerms()
 
     for (size_t i = 1; i < WINDOW_SIZE / 2 - 2; i++)
     {
-        float co = std::cos(aC * i);
         angleTerms[i] = std::cos(aC * i);
-
-        float si = std::sin(aC * i);
         angleTerms[i + 510] = std::sin(aC * i);
     }
 }
